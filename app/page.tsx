@@ -777,19 +777,40 @@ useEffect(() => {
     setDirty(true);
   };
 
-  const shareEmployeeWithCurator = () => {
-    if (!selectedEmployeeId || !shareCuratorId) return;
+	const shareEmployeeWithCurator = async () => {
+	  if (!selectedEmployeeId || !shareCuratorId) return;
 
-    setCuratorAccessMap((prev) => {
-      const existing = prev[shareCuratorId] || [];
-      if (existing.includes(selectedEmployeeId)) return prev;
+	  try {
+		const { error } = await supabase
+		  .from("curator_access")
+		  .upsert(
+			{
+			  curator_id: shareCuratorId,
+			  employee_id: selectedEmployeeId,
+			},
+			{
+			  onConflict: "curator_id,employee_id",
+			}
+		  );
 
-      return {
-        ...prev,
-        [shareCuratorId]: [...existing, selectedEmployeeId],
-      };
-    });
-  };
+		if (error) throw error;
+
+		setCuratorAccessMap((prev) => {
+		  const existing = prev[shareCuratorId] || [];
+		  if (existing.includes(selectedEmployeeId)) return prev;
+
+		  return {
+			...prev,
+			[shareCuratorId]: [...existing, selectedEmployeeId],
+		  };
+		});
+
+		alert("Доступ выдан");
+	  } catch (error) {
+		console.error(error);
+		alert("Не удалось выдать доступ");
+	  }
+	};
 
   const updateScore = (projectId: string, metricCode: MetricCode, field: keyof MetricScore, value: string) => {
     updateCurrentSession((session) => ({
