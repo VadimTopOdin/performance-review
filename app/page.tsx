@@ -268,6 +268,7 @@ type DbCurator = {
   id: string;
   email: string;
   name: string | null;
+  role: "admin" | "curator" | null;
 };
 
 type DbProject = {
@@ -374,6 +375,8 @@ export default function PerformanceReviewUiMvp() {
   const [authLoading, setAuthLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState("");
+  const [currentUserRole, setCurrentUserRole] = useState<"admin" | "curator">("curator");
+  const [showIntro, setShowIntro] = useState(true);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("1");
   const [selectedYear, setSelectedYear] = useState("2025");
   const [selectedMeetingNumber, setSelectedMeetingNumber] = useState("2");
@@ -402,7 +405,8 @@ export default function PerformanceReviewUiMvp() {
   const currentUser = useMemo(() => ({
     id: currentUserId || "",
     name: currentUserName || authUser?.user_metadata?.full_name || authUser?.email || "",
-  }), [currentUserId, currentUserName, authUser]);
+    role: currentUserRole,
+  }), [currentUserId, currentUserName, currentUserRole, authUser]);
 
   const selectedEmployee = useMemo(() => {
     return employees.find((employee) => employee.id === selectedEmployeeId) ?? employees[0];
@@ -410,8 +414,9 @@ export default function PerformanceReviewUiMvp() {
 
   const allowedIds = useMemo(() => {
     if (!currentUserId) return [];
+    if (currentUserRole === "admin") return employees.map((employee) => employee.id);
     return curatorAccessMap[currentUserId] || [];
-  }, [curatorAccessMap, currentUserId]);
+  }, [curatorAccessMap, currentUserId, currentUserRole, employees]);
 
   const filteredEmployees = useMemo(() => {
     const base = employees.filter((employee) => allowedIds.includes(employee.id));
@@ -458,6 +463,7 @@ export default function PerformanceReviewUiMvp() {
       if (!authUser?.email) {
         setCurrentUserId(null);
         setCurrentUserName("");
+        setCurrentUserRole("curator");
         return;
       }
 
@@ -465,7 +471,7 @@ export default function PerformanceReviewUiMvp() {
 
       const { data: existing, error: selectError } = await supabase
         .from("curators")
-        .select("id, name")
+        .select("id, name, role")
         .eq("email", authUser.email)
         .maybeSingle();
 
@@ -477,13 +483,14 @@ export default function PerformanceReviewUiMvp() {
       if (existing) {
         setCurrentUserId(existing.id);
         setCurrentUserName(existing.name || displayName);
+        setCurrentUserRole((existing.role as "admin" | "curator" | null) || "curator");
         return;
       }
 
       const { data: inserted, error: insertError } = await supabase
         .from("curators")
-        .insert({ email: authUser.email, name: displayName })
-        .select("id, name")
+        .insert({ email: authUser.email, name: displayName, role: "curator" })
+        .select("id, name, role")
         .single();
 
       if (insertError) {
@@ -493,6 +500,7 @@ export default function PerformanceReviewUiMvp() {
 
       setCurrentUserId(inserted.id);
       setCurrentUserName(inserted.name || displayName);
+      setCurrentUserRole((inserted.role as "admin" | "curator" | null) || "curator");
     };
 
     syncCurator();
@@ -514,7 +522,7 @@ useEffect(() => {
       feedbackRes,
     ] = await Promise.all([
       supabase.from("employees").select("id, full_name, grade").order("id"),
-      supabase.from("curators").select("id, email, name").order("name"),
+      supabase.from("curators").select("id, email, name, role").order("name"),
       supabase.from("curator_access").select("curator_id, employee_id"),
       supabase.from("projects").select("id, name").order("name"),
       supabase
@@ -560,7 +568,7 @@ useEffect(() => {
 
     const nextCuratorOptions = ((curatorsRes.data as DbCurator[]) || []).map((curator) => ({
       id: curator.id,
-      name: curator.name || curator.email,
+      name: `${curator.name || curator.email}${curator.role === "admin" ? " (admin)" : ""}`,
     }));
 
     const nextCuratorAccessMap: Record<string, string[]> = {};
@@ -1162,6 +1170,100 @@ const saveAllToDb = async () => {
     );
   }
 
+  if (showIntro) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-6">
+        <div className="mx-auto grid min-h-[calc(100vh-48px)] max-w-6xl gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+          <Card className="rounded-3xl border-0 shadow-sm">
+            <CardContent className="flex h-full flex-col justify-between p-8 lg:p-10">
+              <div className="space-y-6">
+                <Badge variant="secondary" className="rounded-full px-3 py-1 text-xs">
+                  Performance Review
+                </Badge>
+                <div className="space-y-4">
+                  <h1 className="text-3xl font-semibold tracking-tight lg:text-5xl">
+                    Система оценки сотрудников по проектам
+                  </h1>
+                  <p className="max-w-2xl text-base leading-7 text-slate-600 lg:text-lg">
+                    Это титульный экран. Сюда можно добавить описание процесса, правила оценки, ссылки на регламент,
+                    критерии по уровням и любые вводные для кураторов и руководителей.
+                  </p>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="rounded-2xl border bg-slate-50 p-4">
+                    <div className="mb-2 text-sm font-medium">Перформанс-профиль</div>
+                    <div className="text-sm text-slate-600">Оценка по метрикам, проектам и динамике между встречами.</div>
+                  </div>
+                  <div className="rounded-2xl border bg-slate-50 p-4">
+                    <div className="mb-2 text-sm font-medium">Уникальные навыки</div>
+                    <div className="text-sm text-slate-600">Навыки сотрудника без привязки к конкретной встрече.</div>
+                  </div>
+                  <div className="rounded-2xl border bg-slate-50 p-4">
+                    <div className="mb-2 text-sm font-medium">360 и шаринг</div>
+                    <div className="text-sm text-slate-600">Фидбек коллег и возможность передавать сотрудника другому куратору.</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-8 flex flex-wrap gap-3">
+                {authUser ? (
+                  <Button onClick={() => setShowIntro(false)} size="lg">
+                    Открыть приложение
+                  </Button>
+                ) : (
+                  <Button onClick={signInWithGoogle} size="lg">
+                    Войти через Google
+                  </Button>
+                )}
+                {authUser ? (
+                  <Button variant="outline" size="lg" onClick={signOut}>
+                    Выйти
+                  </Button>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-3xl border-0 shadow-sm">
+            <CardContent className="flex h-full flex-col justify-between p-8">
+              <div className="space-y-5">
+                <div>
+                  <div className="text-sm font-medium text-slate-500">Текущий статус</div>
+                  <div className="mt-2 text-2xl font-semibold">
+                    {authUser ? "Вход выполнен" : "Нужна авторизация"}
+                  </div>
+                </div>
+
+                <div className="space-y-3 rounded-2xl border bg-slate-50 p-4">
+                  <div className="text-sm font-medium">Что можно написать здесь</div>
+                  <ul className="space-y-2 text-sm text-slate-600">
+                    <li>• цель системы и для кого она нужна</li>
+                    <li>• как часто проводить встречи</li>
+                    <li>• как интерпретировать уровни junior / mid / senior</li>
+                    <li>• кто видит всех сотрудников, а кто только своих</li>
+                  </ul>
+                </div>
+
+                {authUser ? (
+                  <div className="rounded-2xl border bg-slate-50 p-4 text-sm">
+                    <div className="font-medium">{currentUser.name || authUser.email}</div>
+                    <div className="mt-1 break-all text-slate-500">{authUser.email}</div>
+                    <div className="mt-3">
+                      <Badge className="rounded-full border-0 bg-slate-900 text-white hover:bg-slate-900">
+                        {currentUserRole === "admin" ? "Админ" : "Куратор"}
+                      </Badge>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return <div className="min-h-screen bg-slate-50 p-6">Загрузка...</div>;
   }
@@ -1259,7 +1361,7 @@ const saveAllToDb = async () => {
             </div>
 
             <div className="rounded-2xl border bg-slate-50 p-3 text-sm">
-              <div className="font-medium">{currentUser.name}</div>
+              <div className="flex items-center justify-between gap-2"><div className="font-medium">{currentUser.name}</div><Badge variant={currentUser.role === "admin" ? "default" : "secondary"}>{currentUser.role === "admin" ? "Админ" : "Куратор"}</Badge></div>
               <div className="text-slate-500 break-all">{authUser.email}</div>
               <Button variant="outline" className="mt-3 w-full" onClick={signOut}>
                 Выйти
