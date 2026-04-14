@@ -1177,7 +1177,7 @@ const saveAllToDb = async () => {
         <div className="mx-auto grid min-h-[calc(100vh-48px)] max-w-6xl gap-6 lg:grid-cols-[1.2fr_0.8fr]">
           <Card className="rounded-3xl border-0 shadow-sm">
 			<Image
-				src="/hero.png"
+				src="/kpi.png"
 				alt="preview"
 				width={800}
 				height={800}
