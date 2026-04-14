@@ -146,7 +146,7 @@ const initialAllProjectOptions: Project[] = [
 const getYear = (date: string) => (date ? String(date).slice(0, 4) : "");
 
 const HEADER_CONTROL_CLASS =
-  "border-slate-200 shadow-none ring-0 outline-none focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:border-slate-200 data-[state=open]:ring-0 data-[state=open]:shadow-none";
+  "border-slate-200 dark:border-slate-800 shadow-none ring-0 outline-none focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:border-slate-200 dark:border-slate-800 data-[state=open]:ring-0 data-[state=open]:shadow-none";
 
 const blurActiveElement = () => {
   if (typeof document === "undefined") return;
@@ -377,7 +377,6 @@ export default function PerformanceReviewUiMvp() {
   };
   const [authUser, setAuthUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState("");
   const [currentUserRole, setCurrentUserRole] = useState<"admin" | "curator">("curator");
@@ -402,14 +401,15 @@ export default function PerformanceReviewUiMvp() {
   const [showNewMeetingPicker, setShowNewMeetingPicker] = useState(false);
   const [newMeetingDate, setNewMeetingDate] = useState("");
   const [showAddEmployeeForm, setShowAddEmployeeForm] = useState(false);
-  const [showEditEmployeeForm, setShowEditEmployeeForm] = useState(false);
   const [newEmployeeName, setNewEmployeeName] = useState("");
   const [newEmployeeGrade, setNewEmployeeGrade] = useState("");
+  const [addingEmployee, setAddingEmployee] = useState(false);
+  const [deletingEmployee, setDeletingEmployee] = useState(false);
+  const [showEditEmployeeForm, setShowEditEmployeeForm] = useState(false);
   const [editEmployeeName, setEditEmployeeName] = useState("");
   const [editEmployeeGrade, setEditEmployeeGrade] = useState("");
-  const [addingEmployee, setAddingEmployee] = useState(false);
-  const [updatingEmployee, setUpdatingEmployee] = useState(false);
-  const [deletingEmployee, setDeletingEmployee] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
 
   const currentUser = useMemo(() => ({
     id: currentUserId || "",
@@ -466,30 +466,30 @@ export default function PerformanceReviewUiMvp() {
       subscription.unsubscribe();
     };
   }, []);
-
   useEffect(() => {
     if (typeof window === "undefined") return;
+
     const savedTheme = window.localStorage.getItem("anti-kpi-theme");
     if (savedTheme === "dark" || savedTheme === "light") {
       setTheme(savedTheme);
+      return;
     }
+
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    setTheme(prefersDark ? "dark" : "light");
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem("anti-kpi-theme", theme);
-    document.documentElement.classList.toggle("dark", theme === "dark");
-  }, [theme]);
+    if (typeof document === "undefined" || typeof window === "undefined") return;
 
-  useEffect(() => {
-    if (!selectedEmployee) return;
-    setEditEmployeeName(selectedEmployee.name || "");
-    setEditEmployeeGrade(selectedEmployee.grade || "");
-  }, [selectedEmployeeId, selectedEmployee]);
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    window.localStorage.setItem("anti-kpi-theme", theme);
+  }, [theme]);
 
   const toggleTheme = () => {
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));
   };
+
 
   useEffect(() => {
     const syncCurator = async () => {
@@ -708,21 +708,15 @@ useEffect(() => {
   }, [filteredEmployees, selectedEmployeeId]);
 
   useEffect(() => {
-    if (!curatorOptions.length) {
-      setShareCuratorId("");
+    if (!selectedEmployee) {
+      setEditEmployeeName("");
+      setEditEmployeeGrade("");
       return;
     }
 
-    const options = curatorOptions.filter((curator) => curator.id !== currentUser.id);
-    if (!options.length) {
-      setShareCuratorId("");
-      return;
-    }
-
-    if (!shareCuratorId || !options.some((curator) => curator.id === shareCuratorId)) {
-      setShareCuratorId(options[0].id);
-    }
-  }, [curatorOptions, currentUser.id, shareCuratorId]);
+    setEditEmployeeName(selectedEmployee.name || "");
+    setEditEmployeeGrade(selectedEmployee.grade || "");
+  }, [selectedEmployeeId, selectedEmployee?.name, selectedEmployee?.grade]);
 
   const employeeSessions = employeeReviewMap[selectedEmployeeId]?.sessions || [];
 
@@ -1000,6 +994,39 @@ useEffect(() => {
   };
 
 
+const updateSelectedEmployee = async () => {
+  if (!selectedEmployeeId || !selectedEmployee) return;
+
+  const fullName = editEmployeeName.trim();
+  const grade = editEmployeeGrade.trim();
+  if (!fullName) return;
+
+  try {
+    setEditingEmployee(true);
+
+    const { error } = await supabase
+      .from("employees")
+      .update({ full_name: fullName, grade: grade || null })
+      .eq("id", selectedEmployeeId);
+
+    if (error) throw error;
+
+    setEmployees((prev) =>
+      prev.map((employee) =>
+        employee.id === selectedEmployeeId ? { ...employee, name: fullName, grade: grade || "" } : employee
+      )
+    );
+
+    setShowEditEmployeeForm(false);
+  } catch (error) {
+    console.error(error);
+    alert("Не удалось обновить сотрудника.");
+  } finally {
+    setEditingEmployee(false);
+  }
+};
+
+
 const addNewEmployee = async () => {
   const fullName = newEmployeeName.trim();
   const grade = newEmployeeGrade.trim();
@@ -1041,45 +1068,6 @@ const addNewEmployee = async () => {
     alert("Не удалось добавить сотрудника.");
   } finally {
     setAddingEmployee(false);
-  }
-};
-
-
-const updateSelectedEmployee = async () => {
-  if (!selectedEmployeeId || !selectedEmployee) return;
-
-  const fullName = editEmployeeName.trim();
-  const grade = editEmployeeGrade.trim();
-  if (!fullName) return;
-
-  try {
-    setUpdatingEmployee(true);
-
-    const { error } = await supabase
-      .from("employees")
-      .update({
-        full_name: fullName,
-        grade: grade || null,
-      })
-      .eq("id", selectedEmployeeId);
-
-    if (error) throw error;
-
-    setEmployees((prev) =>
-      prev.map((employee) =>
-        employee.id === selectedEmployeeId
-          ? { ...employee, name: fullName, grade: grade || "" }
-          : employee
-      )
-    );
-
-    setShowEditEmployeeForm(false);
-    setDirty(false);
-  } catch (error) {
-    console.error(error);
-    alert("Не удалось обновить сотрудника.");
-  } finally {
-    setUpdatingEmployee(false);
   }
 };
 
@@ -1233,13 +1221,13 @@ const saveAllToDb = async () => {
   const tableColumns = `220px 280px repeat(${projects.length}, 280px)`;
 
   if (authLoading) {
-    return <div className={`min-h-screen p-6 ${theme === "dark" ? "bg-slate-950 text-slate-100" : "bg-slate-50 text-slate-900"}`}>Проверяем вход...</div>;
+    return <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-6 text-slate-900 dark:text-slate-100">Проверяем вход...</div>;
   }
 
   if (!authUser) {
     return (
-      <div className={`min-h-screen flex items-center justify-center p-6 ${theme === "dark" ? "bg-slate-950 text-slate-100" : "bg-slate-50 text-slate-900"}`}>
-        <div className="rounded-2xl border bg-white p-8 shadow-sm">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6 text-slate-900 dark:text-slate-100">
+        <div className="rounded-2xl border bg-white dark:bg-slate-900 p-8 shadow-sm">
           <div className="mb-4 text-xl font-semibold">Performance Review</div>
           <Button onClick={signInWithGoogle}>Войти через Google</Button>
         </div>
@@ -1249,10 +1237,10 @@ const saveAllToDb = async () => {
 
   if (!currentUserId) {
     return (
-      <div className={`min-h-screen flex items-center justify-center p-6 ${theme === "dark" ? "bg-slate-950 text-slate-100" : "bg-slate-50 text-slate-900"}`}>
-        <div className="max-w-md rounded-2xl border bg-white p-8 shadow-sm space-y-4">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6 text-slate-900 dark:text-slate-100">
+        <div className="max-w-md rounded-2xl border bg-white dark:bg-slate-900 p-8 shadow-sm space-y-4">
           <div className="text-xl font-semibold">Нет доступа</div>
-          <div className="text-sm text-slate-600">Для аккаунта {authUser.email} ещё не настроен доступ.</div>
+          <div className="text-sm text-slate-600 dark:text-slate-300 dark:text-slate-600">Для аккаунта {authUser.email} ещё не настроен доступ.</div>
           <Button variant="outline" onClick={signOut}>Выйти</Button>
         </div>
       </div>
@@ -1261,9 +1249,9 @@ const saveAllToDb = async () => {
 
   if (showIntro) {
     return (
-      <div className={`min-h-screen p-6 ${theme === "dark" ? "bg-slate-950 text-slate-100" : "bg-slate-50 text-slate-900"}`}>
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-6 text-slate-900 dark:text-slate-100">
         <div className="mx-auto grid min-h-[calc(100vh-48px)] max-w-6xl gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-          <Card className="rounded-3xl border-0 shadow-sm">
+          <Card className="rounded-3xl border border-slate-200 dark:border-slate-800 dark:border-slate-800 shadow-sm bg-white dark:bg-slate-900">
             <CardContent className="flex h-full flex-col justify-between p-8 lg:p-10">
               <div className="space-y-6">
                 <Badge variant="secondary" className="rounded-full px-3 py-1 text-xs">
@@ -1273,7 +1261,7 @@ const saveAllToDb = async () => {
                   <h1 className="text-3xl font-semibold tracking-tight lg:text-5xl">
                     АНТИ KPI
                   </h1>
-                  <p className="max-w-2xl text-base leading-7 text-slate-600 lg:text-lg">
+                  <p className="max-w-2xl text-base leading-7 text-slate-600 dark:text-slate-300 dark:text-slate-600 lg:text-lg">
                     Вайбкод-система по замене гуглодоков, вордов и тому подобного по KPI.
 					По результатам дискуссии в телеге пришли к выводу что KPI как таковые никому не нравятся, решили попробовать заменить их.
 					Листы:
@@ -1281,27 +1269,23 @@ const saveAllToDb = async () => {
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-3">
-                  <div className="rounded-2xl border bg-slate-50 p-4">
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-4">
                     <div className="mb-2 text-sm font-medium">Перформанс-профиль</div>
-                    <div className="text-sm text-slate-600">Оценка по метрикам, проектам и динамике между встречами.</div>
+                    <div className="text-sm text-slate-600 dark:text-slate-300 dark:text-slate-600">Оценка по метрикам, проектам и динамике между встречами.</div>
                   </div>
-                  <div className="rounded-2xl border bg-slate-50 p-4">
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-4">
                     <div className="mb-2 text-sm font-medium">Уникальные навыки</div>
-                    <div className="text-sm text-slate-600">Навыки сотрудника без привязки к конкретной встрече.</div>
+                    <div className="text-sm text-slate-600 dark:text-slate-300 dark:text-slate-600">Навыки сотрудника без привязки к конкретной встрече.</div>
                   </div>
-                  <div className="rounded-2xl border bg-slate-50 p-4">
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-4">
                     <div className="mb-2 text-sm font-medium">360 и шаринг</div>
-                    <div className="text-sm text-slate-600">Фидбек коллег и возможность передавать сотрудника другому куратору.</div>
+                    <div className="text-sm text-slate-600 dark:text-slate-300 dark:text-slate-600">Фидбек коллег и возможность передавать сотрудника другому куратору.</div>
                   </div>
                 </div>
               </div>
 
 
               <div className="mt-8 flex flex-wrap gap-3">
-                <Button variant="outline" size="lg" onClick={toggleTheme}>
-                  {theme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
-                  {theme === "dark" ? "Светлая тема" : "Тёмная тема"}
-                </Button>
                 {authUser ? (
                   <Button onClick={() => setShowIntro(false)} size="lg">
                     Открыть приложение
@@ -1311,6 +1295,10 @@ const saveAllToDb = async () => {
                     Войти через Google
                   </Button>
                 )}
+                <Button variant="outline" size="lg" onClick={toggleTheme}>
+                  {theme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
+                  {theme === "dark" ? "Светлая тема" : "Тёмная тема"}
+                </Button>
                 {authUser ? (
                   <Button variant="outline" size="lg" onClick={signOut}>
                     Выйти
@@ -1327,19 +1315,19 @@ const saveAllToDb = async () => {
             </CardContent>
           </Card>
 
-          <Card className="rounded-3xl border-0 shadow-sm">
+          <Card className="rounded-3xl border border-slate-200 dark:border-slate-800 dark:border-slate-800 shadow-sm bg-white dark:bg-slate-900">
             <CardContent className="flex h-full flex-col justify-between p-8">
               <div className="space-y-5">
                 <div>
-                  <div className="text-sm font-medium text-slate-500">Текущий статус</div>
+                  <div className="text-sm font-medium text-slate-500 dark:text-slate-400">Текущий статус</div>
                   <div className="mt-2 text-2xl font-semibold">
                     {authUser ? "Вход выполнен" : "Нужна авторизация"}
                   </div>
                 </div>
 
-                <div className="space-y-3 rounded-2xl border bg-slate-50 p-4">
+                <div className="space-y-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-4">
                   <div className="text-sm font-medium">Привет, куратор</div>
-                  <ul className="space-y-2 text-sm text-slate-600">
+                  <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300 dark:text-slate-600">
                     <li>• Если хочешь создать нового сотрудника - так и кликай.</li>
                     <li>• Если знаешь что сотрудник уже создан (например, был у другого куратора до этого) - попроси у него доступ.</li>
                     <li>• Уровень jun/mid/senior и т.д. оцениваем по вайбу, четких критериев не предъявляется</li>
@@ -1348,11 +1336,11 @@ const saveAllToDb = async () => {
                 </div>
 
                 {authUser ? (
-                  <div className="rounded-2xl border bg-slate-50 p-4 text-sm">
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-4 text-sm">
                     <div className="font-medium">{currentUser.name || authUser.email}</div>
-                    <div className="mt-1 break-all text-slate-500">{authUser.email}</div>
+                    <div className="mt-1 break-all text-slate-500 dark:text-slate-400">{authUser.email}</div>
                     <div className="mt-3">
-                      <Badge className="rounded-full border-0 bg-slate-900 text-white hover:bg-slate-900">
+                      <Badge className="rounded-full border-0 bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 hover:bg-slate-900">
                         {currentUserRole === "admin" ? "Админ" : "Куратор"}
                       </Badge>
                     </div>
@@ -1367,13 +1355,13 @@ const saveAllToDb = async () => {
   }
 
   if (loading) {
-    return <div className={`min-h-screen p-6 ${theme === "dark" ? "bg-slate-950 text-slate-100" : "bg-slate-50 text-slate-900"}`}>Загрузка...</div>;
+    return <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-6 text-slate-900 dark:text-slate-100">Загрузка...</div>;
   }
 
   return (
-    <div className={`min-h-screen p-6 ${theme === "dark" ? "bg-slate-950 text-slate-100" : "bg-slate-50 text-slate-900"}`}>
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-6 text-slate-900 dark:text-slate-100">
       <div className="grid w-full grid-cols-1 gap-6 lg:grid-cols-[320px_1fr]">
-        <Card className="rounded-2xl shadow-sm">
+        <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 dark:border-slate-800 bg-white dark:bg-slate-900">
           <CardHeader className="space-y-4">
             <CardTitle className="flex items-center gap-2 text-lg">
               <Users className="h-5 w-5" />
@@ -1381,19 +1369,13 @@ const saveAllToDb = async () => {
             </CardTitle>
 
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => {
-                setShowAddEmployeeForm((prev) => !prev);
-                setShowEditEmployeeForm(false);
-              }} className="flex-1">
+              <Button variant="outline" onClick={() => setShowAddEmployeeForm((prev) => !prev)} className="flex-1">
                 <Plus className="mr-2 h-4 w-4" />
                 Добавить сотрудника
               </Button>
               <Button
                 variant="outline"
-                onClick={() => {
-                  setShowEditEmployeeForm((prev) => !prev);
-                  setShowAddEmployeeForm(false);
-                }}
+                onClick={() => setShowEditEmployeeForm((prev) => !prev)}
                 disabled={!selectedEmployeeId}
               >
                 <Pencil className="mr-2 h-4 w-4" />
@@ -1410,7 +1392,7 @@ const saveAllToDb = async () => {
             </div>
 
             {showAddEmployeeForm ? (
-              <div className="space-y-3 rounded-2xl border bg-slate-50 p-3">
+              <div className="space-y-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-3">
                 <div>
                   <Label className="mb-2 block">ФИО</Label>
                   <Input
@@ -1464,8 +1446,8 @@ const saveAllToDb = async () => {
                   />
                 </div>
                 <div className="flex gap-2">
-                  <Button onClick={updateSelectedEmployee} disabled={!editEmployeeName.trim() || updatingEmployee}>
-                    {updatingEmployee ? "Сохраняю..." : "Сохранить изменения"}
+                  <Button onClick={updateSelectedEmployee} disabled={!editEmployeeName.trim() || editingEmployee}>
+                    {editingEmployee ? "Сохраняю..." : "Сохранить изменения"}
                   </Button>
                   <Button
                     variant="ghost"
@@ -1486,7 +1468,7 @@ const saveAllToDb = async () => {
               <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск" className="pl-9" />
             </div>
 
-            <div className="space-y-2 rounded-2xl border bg-slate-50 p-3">
+            <div className="space-y-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-3">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <Share2 className="h-4 w-4" />
                 Поделиться сотрудником
@@ -1512,9 +1494,9 @@ const saveAllToDb = async () => {
               </div>
             </div>
 
-            <div className="rounded-2xl border bg-slate-50 p-3 text-sm">
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-3 text-sm">
               <div className="flex items-center justify-between gap-2"><div className="font-medium">{currentUser.name}</div><Badge variant={currentUser.role === "admin" ? "default" : "secondary"}>{currentUser.role === "admin" ? "Админ" : "Куратор"}</Badge></div>
-              <div className="text-slate-500 break-all">{authUser.email}</div>
+              <div className="text-slate-500 dark:text-slate-400 break-all">{authUser.email}</div>
               <Button variant="outline" className="mt-3 w-full" onClick={toggleTheme}>
                 {theme === "dark" ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
                 {theme === "dark" ? "Светлая тема" : "Тёмная тема"}
@@ -1536,13 +1518,13 @@ const saveAllToDb = async () => {
                     setSelectedEmployeeId(employee.id);
                     setDirty(false);
                   }}
-                  className={`w-full rounded-2xl border p-4 text-left transition ${
-                    active ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white hover:bg-slate-100"
+                  className={`w-full rounded-2xl border border-slate-200 dark:border-slate-800 dark:border-slate-800 p-4 text-left transition ${
+                    active ? "border-slate-900 bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900" : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800"
                   }`}
                 >
                   <div>
                     <div className="font-medium">{employee.name}</div>
-                    <div className={`text-sm ${active ? "text-slate-300" : "text-slate-500"}`}>{employee.grade}</div>
+                    <div className={`text-sm ${active ? "text-slate-300 dark:text-slate-600" : "text-slate-500 dark:text-slate-400"}`}>{employee.grade}</div>
                   </div>
                 </button>
               );
@@ -1551,14 +1533,14 @@ const saveAllToDb = async () => {
         </Card>
 
         <div className="space-y-6">
-          <Card className="rounded-2xl shadow-sm">
+          <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 dark:border-slate-800 bg-white dark:bg-slate-900">
             <CardContent className="p-6">
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-[260px_minmax(0,1fr)] xl:min-h-[132px]">
                 <div className="flex min-h-[84px] flex-col justify-start overflow-hidden">
                   <div className="truncate text-2xl font-semibold leading-tight" title={selectedEmployee?.name}>
                     {selectedEmployee?.name}
                   </div>
-                  <div className="mt-2 truncate text-sm text-slate-500" title={selectedEmployee?.grade}>
+                  <div className="mt-2 truncate text-sm text-slate-500 dark:text-slate-400" title={selectedEmployee?.grade}>
                     {selectedEmployee?.grade}
                   </div>
                   <div className="mt-4">
@@ -1664,13 +1646,13 @@ const saveAllToDb = async () => {
 
                   <div className="grid gap-3 xl:grid-cols-[170px] xl:items-end">
 					<div className="flex flex-col gap-2">
-					  <Label className="flex items-center gap-2 text-sm text-slate-500">
+					  <Label className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
 						<CalendarDays className="h-4 w-4" />
 						Дата встречи
 					  </Label>
 
 					  <div
-						className={`flex h-10 w-[170px] items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 ${HEADER_CONTROL_CLASS}`}
+						className={`flex h-10 w-[170px] items-center rounded-md border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 px-3 text-sm text-slate-700 ${HEADER_CONTROL_CLASS}`}
 					  >
 						{meetingDate
 						  ? meetingDate.split("-").reverse().join(".")
@@ -1684,7 +1666,7 @@ const saveAllToDb = async () => {
           </Card>
 
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-2 text-sm text-slate-500">
+            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
               <Briefcase className="h-4 w-4" />
               {projects.length} проекта(ов) в review
             </div>
@@ -1692,26 +1674,26 @@ const saveAllToDb = async () => {
           </div>
 
           <Tabs defaultValue="profile" className="space-y-4">
-            <TabsList className="grid w-full grid-cols-3 rounded-2xl">
+            <TabsList className="grid w-full grid-cols-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
               <TabsTrigger value="profile">Перформанс-профиль</TabsTrigger>
               <TabsTrigger value="skills">Уникальные навыки</TabsTrigger>
               <TabsTrigger value="feedback">360</TabsTrigger>
             </TabsList>
 
             <TabsContent value="profile">
-              <Card className="rounded-2xl shadow-sm">
+              <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 dark:border-slate-800 bg-white dark:bg-slate-900">
                 <CardHeader className="gap-4">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="space-y-3">
                       <CardTitle className="text-lg">Оценка по проектам</CardTitle>
                       <div className="flex flex-wrap gap-2">
                         {projects.map((project) => (
-                          <div key={project.id} className="flex items-center gap-2 rounded-full border bg-slate-50 px-3 py-1 text-sm">
+                          <div key={project.id} className="flex items-center gap-2 rounded-full border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 px-3 py-1 text-sm">
                             <span>{project.name}</span>
                             <button
                               type="button"
                               onClick={() => removeProjectFromEmployee(project.id)}
-                              className="rounded-full p-0.5 text-slate-500 hover:bg-slate-200 hover:text-slate-900"
+                              className="rounded-full p-0.5 text-slate-500 dark:text-slate-400 hover:bg-slate-200 hover:text-slate-900"
                               aria-label={`Удалить проект ${project.name}`}
                             >
                               <X className="h-3.5 w-3.5" />
@@ -1758,7 +1740,7 @@ const saveAllToDb = async () => {
                       </Button>
 
                       {showCreateProjectForm && (
-                        <div className="space-y-3 rounded-2xl border bg-slate-50 p-4">
+                        <div className="space-y-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-4">
                           <div className="grid gap-3 sm:grid-cols-2">
                             <div>
                               <Label className="mb-2 block">Название проекта</Label>
@@ -1801,13 +1783,13 @@ const saveAllToDb = async () => {
 
                 <CardContent className="space-y-6">
                   {projects.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed p-8 text-center text-slate-500">
+                    <div className="rounded-2xl border border-dashed p-8 text-center text-slate-500 dark:text-slate-400">
                       У этой встречи пока нет проектов. Добавь проект сверху.
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
                       <div className="space-y-4" style={{ minWidth: tableMinWidth }}>
-                        <div className="grid gap-4 px-1 text-sm font-medium text-slate-500" style={{ gridTemplateColumns: tableColumns }}>
+                        <div className="grid gap-4 px-1 text-sm font-medium text-slate-500 dark:text-slate-400" style={{ gridTemplateColumns: tableColumns }}>
                           <div>Метрика</div>
                           <div>На что смотрим</div>
                           {projects.map((project) => (
@@ -1818,14 +1800,14 @@ const saveAllToDb = async () => {
                         {metrics.map((metric) => (
                           <div
                             key={metric.code}
-                            className="grid gap-4 rounded-2xl border bg-white p-4"
+                            className="grid gap-4 rounded-2xl border bg-white dark:bg-slate-900 p-4"
                             style={{ gridTemplateColumns: tableColumns }}
                           >
                             <div>
                               <div className="font-semibold">{metric.name}</div>
                             </div>
 
-                            <div className="text-sm text-slate-600">
+                            <div className="text-sm text-slate-600 dark:text-slate-300 dark:text-slate-600">
                               <ul className="space-y-1">
                                 {metric.hints.map((hint) => (
                                   <li key={hint}>• {hint}</li>
@@ -1834,7 +1816,7 @@ const saveAllToDb = async () => {
                             </div>
 
                             {projects.map((project) => (
-                              <div key={project.id} className="space-y-3 rounded-xl border border-slate-200 p-3">
+                              <div key={project.id} className="space-y-3 rounded-xl border border-slate-200 dark:border-slate-800 p-3">
                                 <div>
                                   <Label className="mb-2 flex items-center gap-2">
                                     Оценка
@@ -1881,7 +1863,7 @@ const saveAllToDb = async () => {
             </TabsContent>
 
             <TabsContent value="skills">
-              <Card className="rounded-2xl shadow-sm">
+              <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 dark:border-slate-800 bg-white dark:bg-slate-900">
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <Star className="h-5 w-5" />
@@ -1894,8 +1876,8 @@ const saveAllToDb = async () => {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {employeeSkills.map((skill, index) => (
-                    <div key={skill.id} className="flex items-center gap-3 rounded-2xl border p-3">
-                      <div className="w-8 text-sm text-slate-500">{index + 1}</div>
+                    <div key={skill.id} className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 dark:border-slate-800 p-3">
+                      <div className="w-8 text-sm text-slate-500 dark:text-slate-400">{index + 1}</div>
                       <Input value={skill.name} onChange={(e) => updateSkill(skill.id, e.target.value)} placeholder="Название навыка" />
                       <Button variant="ghost" size="icon" onClick={() => removeSkill(skill.id)}>
                         <Trash2 className="h-4 w-4" />
@@ -1907,7 +1889,7 @@ const saveAllToDb = async () => {
             </TabsContent>
 
             <TabsContent value="feedback">
-              <Card className="rounded-2xl shadow-sm">
+              <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 dark:border-slate-800 bg-white dark:bg-slate-900">
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle className="text-lg">360 feedback</CardTitle>
                   <Button variant="outline" onClick={addFeedback}>
@@ -1917,7 +1899,7 @@ const saveAllToDb = async () => {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {feedback.map((item, index) => (
-                    <div key={item.id} className="rounded-2xl border p-4">
+                    <div key={item.id} className="rounded-2xl border border-slate-200 dark:border-slate-800 dark:border-slate-800 p-4">
                       <div className="mb-4 flex items-center justify-between">
                         <div className="font-medium">Ответ #{index + 1}</div>
                         <Button variant="ghost" size="icon" onClick={() => removeFeedback(item.id)}>
