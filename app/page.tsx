@@ -1368,28 +1368,32 @@ const saveAllToDb = async () => {
               Сотрудники (мои)
             </CardTitle>
 
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setShowAddEmployeeForm((prev) => !prev)} className="flex-1">
-                <Plus className="mr-2 h-4 w-4" />
-                Добавить сотрудника
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setShowEditEmployeeForm((prev) => !prev)}
-                disabled={!selectedEmployeeId}
-              >
-                <Pencil className="mr-2 h-4 w-4" />
-                Править
-              </Button>
-              <Button
-                variant="outline"
-                onClick={deleteSelectedEmployee}
-                disabled={!selectedEmployeeId || deletingEmployee}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                {deletingEmployee ? "Удаляю..." : "Удалить"}
-              </Button>
-            </div>
+			<div className="space-y-2">
+			  <Button variant="outline" onClick={() => setShowAddEmployeeForm((prev) => !prev)} className="w-full">
+				<Plus className="mr-2 h-4 w-4" />
+				Добавить сотрудника
+			  </Button>
+
+			  <Button
+				variant="outline"
+				onClick={() => setShowEditEmployeeForm((prev) => !prev)}
+				disabled={!selectedEmployeeId}
+				className="w-full"
+			  >
+				<Pencil className="mr-2 h-4 w-4" />
+				Править
+			  </Button>
+
+			  <Button
+				variant="outline"
+				onClick={deleteSelectedEmployee}
+				disabled={!selectedEmployeeId || deletingEmployee}
+				className="w-full"
+			  >
+				<Trash2 className="mr-2 h-4 w-4" />
+				{deletingEmployee ? "Удаляю..." : "Удалить"}
+			  </Button>
+			</div>
 
             {showAddEmployeeForm ? (
               <div className="space-y-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-3">
