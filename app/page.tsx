@@ -27,6 +27,7 @@ import {
   Minus,
   Share2,
 } from "lucide-react";
+import Image from "next/image";
 
 type Level = "junior" | "mid" | "strong_mid" | "senior" | "lead";
 
@@ -1175,6 +1176,13 @@ const saveAllToDb = async () => {
       <div className="min-h-screen bg-slate-50 p-6">
         <div className="mx-auto grid min-h-[calc(100vh-48px)] max-w-6xl gap-6 lg:grid-cols-[1.2fr_0.8fr]">
           <Card className="rounded-3xl border-0 shadow-sm">
+			<Image
+				src="/hero.png"
+				alt="preview"
+				width={800}
+				height={800}
+				className="h-full w-full object-cover"
+			 />
             <CardContent className="flex h-full flex-col justify-between p-8 lg:p-10">
               <div className="space-y-6">
                 <Badge variant="secondary" className="rounded-full px-3 py-1 text-xs">
@@ -1186,7 +1194,7 @@ const saveAllToDb = async () => {
                   </h1>
                   <p className="max-w-2xl text-base leading-7 text-slate-600 lg:text-lg">
                     Вайбкод-система по замене гуглодоков, вордов и тому подобного по KPI.
-					По результатам дискуссии в телеге пришли к выводу что KPI как таковые никому не нравяться, решили попробовать заменить их.
+					По результатам дискуссии в телеге пришли к выводу что KPI как таковые никому не нравятся, решили попробовать заменить их.
 					Листы:
                   </p>
                 </div>
@@ -1206,6 +1214,7 @@ const saveAllToDb = async () => {
                   </div>
                 </div>
               </div>
+
 
               <div className="mt-8 flex flex-wrap gap-3">
                 {authUser ? (
