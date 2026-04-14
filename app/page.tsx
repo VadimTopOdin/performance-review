@@ -1176,13 +1176,6 @@ const saveAllToDb = async () => {
       <div className="min-h-screen bg-slate-50 p-6">
         <div className="mx-auto grid min-h-[calc(100vh-48px)] max-w-6xl gap-6 lg:grid-cols-[1.2fr_0.8fr]">
           <Card className="rounded-3xl border-0 shadow-sm">
-			<Image
-				src="/kpi.png"
-				alt="preview"
-				width={800}
-				height={800}
-				className="h-full w-full object-cover"
-			 />
             <CardContent className="flex h-full flex-col justify-between p-8 lg:p-10">
               <div className="space-y-6">
                 <Badge variant="secondary" className="rounded-full px-3 py-1 text-xs">
@@ -1232,6 +1225,13 @@ const saveAllToDb = async () => {
                   </Button>
                 ) : null}
               </div>
+			 <Image
+				src="/kpi.png"
+				alt="preview"
+				width={800}
+				height={800}
+				className="h-full w-full object-cover"
+			 />
             </CardContent>
           </Card>
 
