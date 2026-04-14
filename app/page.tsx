@@ -951,7 +951,7 @@ const addNewEmployee = async () => {
     }));
     setEmployeeReviewMap((prev) => ({
       ...prev,
-      [employeeId]: { sessions: [] },
+      [employeeId]: { sessions: [], skills: [] },
     }));
     setSelectedEmployeeId(employeeId);
     setShowAddEmployeeForm(false);
