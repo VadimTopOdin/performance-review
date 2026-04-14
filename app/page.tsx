@@ -1405,23 +1405,20 @@ const saveAllToDb = async () => {
                   </div>
 
                   <div className="grid gap-3 xl:grid-cols-[170px] xl:items-end">
-                    <div className="flex flex-col gap-2">
-                      <Label className="flex items-center gap-2 text-sm text-slate-500">
-                        <CalendarDays className="h-4 w-4" />
-                        Дата встречи
-                      </Label>
-                      <Input
-                        type="date"
-                        value={meetingDate}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          updateCurrentSession((session) => ({ ...session, meetingDate: val }));
-                          const yearFromDate = getYear(val);
-                          if (yearFromDate) setSelectedYear(yearFromDate);
-                        }}
-                        className={`w-[170px] ${HEADER_CONTROL_CLASS}`}
-                      />
-                    </div>
+					<div className="flex flex-col gap-2">
+					  <Label className="flex items-center gap-2 text-sm text-slate-500">
+						<CalendarDays className="h-4 w-4" />
+						Дата встречи
+					  </Label>
+
+					  <div
+						className={`flex h-10 w-[170px] items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 ${HEADER_CONTROL_CLASS}`}
+					  >
+						{meetingDate
+						  ? meetingDate.split("-").reverse().join(".")
+						  : "—"}
+					  </div>
+					</div>
                   </div>
                 </div>
               </div>
