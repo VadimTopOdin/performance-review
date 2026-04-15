@@ -143,6 +143,25 @@ const initialAllProjectOptions: Project[] = [
   { id: "rtdm", name: "RTDM" },
 ];
 
+const gradeOptions = [
+  "Junior Analyst",
+  "Middle Analyst",
+  "Senior Analyst",
+  "Lead Analyst",
+  "Junior Developer",
+  "Middle Developer",
+  "Senior Developer",
+  "Lead Developer",
+  "Junior System Analyst",
+  "Middle System Analyst",
+  "Senior System Analyst",
+  "Lead System Analyst",
+  "Team Lead",
+  "Architect",
+  "QA Engineer",
+  "BA / Consultant",
+];
+
 const getYear = (date: string) => (date ? String(date).slice(0, 4) : "");
 
 const HEADER_CONTROL_CLASS =
@@ -319,6 +338,24 @@ type DbFeedback = {
   comment: string | null;
 };
 
+type DbAccessRequest = {
+  id: number;
+  employee_id: string;
+  requester_curator_id: string;
+  target_curator_id: string | null;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+};
+
+type AccessRequest = {
+  id: number;
+  employeeId: string;
+  requesterCuratorId: string;
+  targetCuratorId: string | null;
+  status: "pending" | "approved" | "rejected";
+  createdAt: string;
+};
+
 function emptyBucket(): EmployeeReviewBucket {
   return { sessions: [], skills: [] };
 }
@@ -410,6 +447,10 @@ export default function PerformanceReviewUiMvp() {
   const [editEmployeeGrade, setEditEmployeeGrade] = useState("");
   const [editingEmployee, setEditingEmployee] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [employeeListTab, setEmployeeListTab] = useState<"mine" | "all">("mine");
+  const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
+  const [requestingEmployeeId, setRequestingEmployeeId] = useState<string | null>(null);
+  const [approvingRequestId, setApprovingRequestId] = useState<number | null>(null);
 
   const currentUser = useMemo(() => ({
     id: currentUserId || "",
@@ -437,6 +478,28 @@ export default function PerformanceReviewUiMvp() {
       return employee.name.toLowerCase().includes(q) || employee.grade.toLowerCase().includes(q);
     });
   }, [allowedIds, search, employees]);
+
+  const allEmployeesFiltered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return employees;
+    return employees.filter((employee) =>
+      employee.name.toLowerCase().includes(q) || employee.grade.toLowerCase().includes(q)
+    );
+  }, [employees, search]);
+
+  const pendingAccessRequests = useMemo(
+    () => accessRequests.filter((request) => request.status === "pending"),
+    [accessRequests]
+  );
+
+  const hasAccessToEmployee = (employeeId: string) => allowedIds.includes(employeeId);
+
+  const canApproveRequest = (employeeId: string) => currentUserRole === "admin" || hasAccessToEmployee(employeeId);
+
+  const getPendingRequestForEmployee = (employeeId: string) =>
+    pendingAccessRequests.find(
+      (request) => request.employeeId === employeeId && request.requesterCuratorId === currentUser.id
+    );
 
 
   useEffect(() => {
@@ -553,6 +616,7 @@ useEffect(() => {
       metricScoresRes,
       employeeSkillsRes,
       feedbackRes,
+      accessRequestsRes,
     ] = await Promise.all([
       supabase.from("employees").select("id, full_name, grade").order("id"),
       supabase.from("curators").select("id, email, name, role").order("name"),
@@ -573,6 +637,10 @@ useEffect(() => {
         .select(
           "id, review_session_id, project_id, respondent_name, respondent_role, comfort, pull, trust, comment"
         ),
+      supabase
+        .from("access_requests")
+        .select("id, employee_id, requester_curator_id, target_curator_id, status, created_at")
+        .order("created_at", { ascending: false }),
     ]);
 
     const errors = [
@@ -585,6 +653,7 @@ useEffect(() => {
       metricScoresRes.error,
       employeeSkillsRes.error,
       feedbackRes.error,
+      accessRequestsRes.error,
     ].filter(Boolean);
 
     if (errors.length) {
@@ -684,6 +753,15 @@ useEffect(() => {
       });
     });
 
+    const nextAccessRequests: AccessRequest[] = ((accessRequestsRes.data as DbAccessRequest[]) || []).map((row) => ({
+      id: row.id,
+      employeeId: row.employee_id,
+      requesterCuratorId: row.requester_curator_id,
+      targetCuratorId: row.target_curator_id,
+      status: row.status,
+      createdAt: row.created_at,
+    }));
+
     Object.values(bucketMap).forEach((bucket) => {
       bucket.sessions.sort(sortSessions);
     });
@@ -693,6 +771,7 @@ useEffect(() => {
     setCuratorOptions(nextCuratorOptions);
     setAllProjectOptions(nextProjects.length ? nextProjects : initialAllProjectOptions);
     setEmployeeReviewMap(bucketMap);
+    setAccessRequests(nextAccessRequests);
     setLoading(false);
   };
 
@@ -708,6 +787,17 @@ useEffect(() => {
   }, [filteredEmployees, selectedEmployeeId]);
 
   useEffect(() => {
+    const availableCurators = curatorOptions.filter((curator) => curator.id !== currentUser.id);
+    if (!availableCurators.length) {
+      setShareCuratorId("");
+      return;
+    }
+    if (!availableCurators.some((curator) => curator.id === shareCuratorId)) {
+      setShareCuratorId(availableCurators[0].id);
+    }
+  }, [curatorOptions, currentUser.id, shareCuratorId]);
+
+  useEffect(() => {
     if (!selectedEmployee) {
       setEditEmployeeName("");
       setEditEmployeeGrade("");
@@ -720,24 +810,9 @@ useEffect(() => {
 
   const employeeSessions = employeeReviewMap[selectedEmployeeId]?.sessions || [];
 
-  const availableYears = useMemo(() => {
-    return [...new Set(employeeSessions.map((session) => getYear(session.meetingDate)).filter(Boolean))].sort(
-      (a, b) => Number(b) - Number(a)
-    );
-  }, [employeeSessions]);
-
   const availableMeetings = useMemo(() => {
-    return employeeSessions
-      .filter((session) => getYear(session.meetingDate) === selectedYear)
-      .sort(sortSessions);
-  }, [employeeSessions, selectedYear]);
-
-  useEffect(() => {
-    if (!availableYears.length) return;
-    if (!availableYears.includes(selectedYear)) {
-      setSelectedYear(availableYears[0]);
-    }
-  }, [availableYears, selectedYear]);
+    return [...employeeSessions].sort(sortSessions);
+  }, [employeeSessions]);
 
   useEffect(() => {
     if (!availableMeetings.length) return;
@@ -748,10 +823,8 @@ useEffect(() => {
   }, [availableMeetings, selectedMeetingNumber]);
 
   const currentSession = useMemo(() => {
-    return employeeSessions.find(
-      (session) => getYear(session.meetingDate) === selectedYear && session.meetingNumber === selectedMeetingNumber
-    );
-  }, [employeeSessions, selectedYear, selectedMeetingNumber]);
+    return employeeSessions.find((session) => session.meetingNumber === selectedMeetingNumber);
+  }, [employeeSessions, selectedMeetingNumber]);
 
   const previousSession = useMemo(() => {
     if (!currentSession) return null;
@@ -792,16 +865,11 @@ useEffect(() => {
   };
 
   const createNewMeeting = (meetingDateOverride?: string) => {
-    const targetDate = (meetingDateOverride || newMeetingDate || `${selectedYear}-01-01`).trim();
-    const targetYear = getYear(targetDate) || selectedYear;
+    const targetDate = (meetingDateOverride || newMeetingDate || new Date().toISOString().slice(0, 10)).trim();
 
     const sessions = employeeReviewMap[selectedEmployeeId]?.sessions || [];
-    const sameYearSessions = sessions.filter((session) => getYear(session.meetingDate) === targetYear);
-
     const nextMeetingNumber = String(
-      sameYearSessions.length
-        ? Math.max(...sameYearSessions.map((session) => Number(session.meetingNumber))) + 1
-        : 1
+      sessions.length ? Math.max(...sessions.map((session) => Number(session.meetingNumber) || 0)) + 1 : 1
     );
 
     const newSession = createReviewSession({
@@ -822,7 +890,6 @@ useEffect(() => {
       },
     }));
 
-    setSelectedYear(targetYear);
     setSelectedMeetingNumber(nextMeetingNumber);
     setNewMeetingDate("");
     setShowNewMeetingPicker(false);
@@ -863,6 +930,87 @@ useEffect(() => {
 		alert("Не удалось выдать доступ");
 	  }
 	};
+
+  const requestAccessToEmployee = async (employeeId: string) => {
+    if (!currentUser.id || hasAccessToEmployee(employeeId)) return;
+
+    const existingPending = pendingAccessRequests.find(
+      (request) => request.employeeId === employeeId && request.requesterCuratorId === currentUser.id
+    );
+    if (existingPending) {
+      alert("Запрос уже отправлен");
+      return;
+    }
+
+    try {
+      setRequestingEmployeeId(employeeId);
+      const { data, error } = await supabase
+        .from("access_requests")
+        .insert({
+          employee_id: employeeId,
+          requester_curator_id: currentUser.id,
+          status: "pending",
+        })
+        .select("id, employee_id, requester_curator_id, target_curator_id, status, created_at")
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        setAccessRequests((prev) => [
+          {
+            id: data.id,
+            employeeId: data.employee_id,
+            requesterCuratorId: data.requester_curator_id,
+            targetCuratorId: data.target_curator_id,
+            status: data.status,
+            createdAt: data.created_at,
+          },
+          ...prev,
+        ]);
+      }
+      alert("Запрос отправлен");
+    } catch (error) {
+      console.error(error);
+      alert("Не удалось отправить запрос");
+    } finally {
+      setRequestingEmployeeId(null);
+    }
+  };
+
+  const approveAccessRequest = async (request: AccessRequest) => {
+    if (!canApproveRequest(request.employeeId)) return;
+
+    try {
+      setApprovingRequestId(request.id);
+      const { error: accessError } = await supabase.from("curator_access").upsert(
+        {
+          curator_id: request.requesterCuratorId,
+          employee_id: request.employeeId,
+        },
+        { onConflict: "curator_id,employee_id" }
+      );
+      if (accessError) throw accessError;
+
+      const { error: requestError } = await supabase
+        .from("access_requests")
+        .update({ status: "approved", resolved_at: new Date().toISOString() })
+        .eq("id", request.id);
+      if (requestError) throw requestError;
+
+      setCuratorAccessMap((prev) => ({
+        ...prev,
+        [request.requesterCuratorId]: [...new Set([...(prev[request.requesterCuratorId] || []), request.employeeId])],
+      }));
+      setAccessRequests((prev) => prev.map((item) => (item.id === request.id ? { ...item, status: "approved" } : item)));
+      alert("Доступ одобрен");
+    } catch (error) {
+      console.error(error);
+      alert("Не удалось одобрить запрос");
+    } finally {
+      setApprovingRequestId(null);
+    }
+  };
 
   const updateScore = (projectId: string, metricCode: MetricCode, field: keyof MetricScore, value: string) => {
     updateCurrentSession((session) => ({
@@ -1240,7 +1388,7 @@ const saveAllToDb = async () => {
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6 text-slate-900 dark:text-slate-100">
         <div className="max-w-md rounded-2xl border bg-white dark:bg-slate-900 p-8 shadow-sm space-y-4">
           <div className="text-xl font-semibold">Нет доступа</div>
-          <div className="text-sm text-slate-600 dark:text-slate-300 dark:text-slate-600">Для аккаунта {authUser.email} ещё не настроен доступ.</div>
+          <div className="text-sm text-slate-600 dark:text-slate-300">Для аккаунта {authUser.email} ещё не настроен доступ.</div>
           <Button variant="outline" onClick={signOut}>Выйти</Button>
         </div>
       </div>
@@ -1251,7 +1399,7 @@ const saveAllToDb = async () => {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-6 text-slate-900 dark:text-slate-100">
         <div className="mx-auto grid min-h-[calc(100vh-48px)] max-w-6xl gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-          <Card className="rounded-3xl border border-slate-200 dark:border-slate-800 dark:border-slate-800 shadow-sm bg-white dark:bg-slate-900">
+          <Card className="rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm bg-white dark:bg-slate-900">
             <CardContent className="flex h-full flex-col justify-between p-8 lg:p-10">
               <div className="space-y-6">
                 <Badge variant="secondary" className="rounded-full px-3 py-1 text-xs">
@@ -1261,7 +1409,7 @@ const saveAllToDb = async () => {
                   <h1 className="text-3xl font-semibold tracking-tight lg:text-5xl">
                     АНТИ KPI
                   </h1>
-                  <p className="max-w-2xl text-base leading-7 text-slate-600 dark:text-slate-300 dark:text-slate-600 lg:text-lg">
+                  <p className="max-w-2xl text-base leading-7 text-slate-600 dark:text-slate-300 lg:text-lg">
                     Вайбкод-система по замене гуглодоков, вордов и тому подобного по KPI.
 					По результатам дискуссии в телеге пришли к выводу что KPI как таковые никому не нравятся, решили попробовать заменить их.
 					Листы:
@@ -1269,17 +1417,17 @@ const saveAllToDb = async () => {
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-3">
-                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-4">
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-4">
                     <div className="mb-2 text-sm font-medium">Перформанс-профиль</div>
-                    <div className="text-sm text-slate-600 dark:text-slate-300 dark:text-slate-600">Оценка по метрикам, проектам и динамике между встречами.</div>
+                    <div className="text-sm text-slate-600 dark:text-slate-300">Оценка по метрикам, проектам и динамике между встречами.</div>
                   </div>
-                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-4">
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-4">
                     <div className="mb-2 text-sm font-medium">Уникальные навыки</div>
-                    <div className="text-sm text-slate-600 dark:text-slate-300 dark:text-slate-600">Навыки сотрудника без привязки к конкретной встрече.</div>
+                    <div className="text-sm text-slate-600 dark:text-slate-300">Навыки сотрудника без привязки к конкретной встрече.</div>
                   </div>
-                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-4">
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-4">
                     <div className="mb-2 text-sm font-medium">360 и шаринг</div>
-                    <div className="text-sm text-slate-600 dark:text-slate-300 dark:text-slate-600">Фидбек коллег и возможность передавать сотрудника другому куратору.</div>
+                    <div className="text-sm text-slate-600 dark:text-slate-300">Фидбек коллег и возможность передавать сотрудника другому куратору.</div>
                   </div>
                 </div>
               </div>
@@ -1315,7 +1463,7 @@ const saveAllToDb = async () => {
             </CardContent>
           </Card>
 
-          <Card className="rounded-3xl border border-slate-200 dark:border-slate-800 dark:border-slate-800 shadow-sm bg-white dark:bg-slate-900">
+          <Card className="rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm bg-white dark:bg-slate-900">
             <CardContent className="flex h-full flex-col justify-between p-8">
               <div className="space-y-5">
                 <div>
@@ -1325,9 +1473,9 @@ const saveAllToDb = async () => {
                   </div>
                 </div>
 
-                <div className="space-y-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-4">
+                <div className="space-y-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-4">
                   <div className="text-sm font-medium">Привет, куратор</div>
-                  <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300 dark:text-slate-600">
+                  <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
                     <li>• Если хочешь создать нового сотрудника - так и кликай.</li>
                     <li>• Если знаешь что сотрудник уже создан (например, был у другого куратора до этого) - попроси у него доступ.</li>
                     <li>• Уровень jun/mid/senior и т.д. оцениваем по вайбу, четких критериев не предъявляется</li>
@@ -1336,7 +1484,7 @@ const saveAllToDb = async () => {
                 </div>
 
                 {authUser ? (
-                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-4 text-sm">
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-4 text-sm">
                     <div className="font-medium">{currentUser.name || authUser.email}</div>
                     <div className="mt-1 break-all text-slate-500 dark:text-slate-400">{authUser.email}</div>
                     <div className="mt-3">
@@ -1361,11 +1509,11 @@ const saveAllToDb = async () => {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-6 text-slate-900 dark:text-slate-100">
       <div className="grid w-full grid-cols-1 gap-6 lg:grid-cols-[320px_1fr]">
-        <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 dark:border-slate-800 bg-white dark:bg-slate-900">
+        <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
           <CardHeader className="space-y-4">
             <CardTitle className="flex items-center gap-2 text-lg">
               <Users className="h-5 w-5" />
-              Сотрудники (мои)
+              Сотрудники
             </CardTitle>
 
 			<div className="space-y-2">
@@ -1396,7 +1544,7 @@ const saveAllToDb = async () => {
 			</div>
 
             {showAddEmployeeForm ? (
-              <div className="space-y-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-3">
+              <div className="space-y-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-3">
                 <div>
                   <Label className="mb-2 block">ФИО</Label>
                   <Input
@@ -1407,11 +1555,18 @@ const saveAllToDb = async () => {
                 </div>
                 <div>
                   <Label className="mb-2 block">Должность / grade</Label>
-                  <Input
-                    value={newEmployeeGrade}
-                    onChange={(e) => setNewEmployeeGrade(e.target.value)}
-                    placeholder="Например, Middle Analyst"
-                  />
+                  <Select value={newEmployeeGrade} onValueChange={setNewEmployeeGrade}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Выбери должность" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {gradeOptions.map((gradeOption) => (
+                        <SelectItem key={gradeOption} value={gradeOption}>
+                          {gradeOption}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="flex gap-2">
                   <Button onClick={addNewEmployee} disabled={!newEmployeeName.trim() || addingEmployee}>
@@ -1432,7 +1587,7 @@ const saveAllToDb = async () => {
             ) : null}
 
             {showEditEmployeeForm ? (
-              <div className="space-y-3 rounded-2xl border bg-slate-50 p-3">
+              <div className="space-y-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-3">
                 <div>
                   <Label className="mb-2 block">ФИО</Label>
                   <Input
@@ -1443,11 +1598,18 @@ const saveAllToDb = async () => {
                 </div>
                 <div>
                   <Label className="mb-2 block">Должность / grade</Label>
-                  <Input
-                    value={editEmployeeGrade}
-                    onChange={(e) => setEditEmployeeGrade(e.target.value)}
-                    placeholder="Например, Middle Analyst"
-                  />
+                  <Select value={editEmployeeGrade} onValueChange={setEditEmployeeGrade}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Выбери должность" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {gradeOptions.map((gradeOption) => (
+                        <SelectItem key={gradeOption} value={gradeOption}>
+                          {gradeOption}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="flex gap-2">
                   <Button onClick={updateSelectedEmployee} disabled={!editEmployeeName.trim() || editingEmployee}>
@@ -1472,7 +1634,7 @@ const saveAllToDb = async () => {
               <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск" className="pl-9" />
             </div>
 
-            <div className="space-y-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-3">
+            <div className="space-y-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-3">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <Share2 className="h-4 w-4" />
                 Поделиться сотрудником
@@ -1498,7 +1660,7 @@ const saveAllToDb = async () => {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-3 text-sm">
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-3 text-sm">
               <div className="flex items-center justify-between gap-2"><div className="font-medium">{currentUser.name}</div><Badge variant={currentUser.role === "admin" ? "default" : "secondary"}>{currentUser.role === "admin" ? "Админ" : "Куратор"}</Badge></div>
               <div className="text-slate-500 dark:text-slate-400 break-all">{authUser.email}</div>
               <Button variant="outline" className="mt-3 w-full" onClick={toggleTheme}>
@@ -1512,32 +1674,85 @@ const saveAllToDb = async () => {
           </CardHeader>
 
           <CardContent className="space-y-3">
-            {filteredEmployees.map((employee) => {
-              const active = employee.id === selectedEmployeeId;
+            <Tabs value={employeeListTab} onValueChange={(value) => setEmployeeListTab(value as "mine" | "all")} className="space-y-3">
+              <TabsList className="grid w-full grid-cols-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                <TabsTrigger value="mine">Мои</TabsTrigger>
+                <TabsTrigger value="all">Все сотрудники</TabsTrigger>
+              </TabsList>
 
-              return (
-                <button
-                  key={employee.id}
-                  onClick={() => {
-                    setSelectedEmployeeId(employee.id);
-                    setDirty(false);
-                  }}
-                  className={`w-full rounded-2xl border border-slate-200 dark:border-slate-800 dark:border-slate-800 p-4 text-left transition ${
-                    active ? "border-slate-900 bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900" : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800"
-                  }`}
-                >
-                  <div>
-                    <div className="font-medium">{employee.name}</div>
-                    <div className={`text-sm ${active ? "text-slate-300 dark:text-slate-600" : "text-slate-500 dark:text-slate-400"}`}>{employee.grade}</div>
-                  </div>
-                </button>
-              );
-            })}
+              <TabsContent value="mine" className="space-y-3">
+                {filteredEmployees.map((employee) => {
+                  const active = employee.id === selectedEmployeeId;
+
+                  return (
+                    <button
+                      key={employee.id}
+                      onClick={() => {
+                        setSelectedEmployeeId(employee.id);
+                        setDirty(false);
+                      }}
+                      className={`w-full rounded-2xl border border-slate-200 dark:border-slate-800 p-4 text-left transition ${
+                        active ? "border-slate-900 bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900" : "bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      }`}
+                    >
+                      <div>
+                        <div className="font-medium">{employee.name}</div>
+                        <div className={`text-sm ${active ? "text-slate-300 dark:text-slate-600" : "text-slate-500 dark:text-slate-400"}`}>{employee.grade}</div>
+                      </div>
+                    </button>
+                  );
+                })}
+                {!filteredEmployees.length ? <div className="text-sm text-slate-500 dark:text-slate-400">Пока нет сотрудников</div> : null}
+              </TabsContent>
+
+              <TabsContent value="all" className="space-y-3">
+                {allEmployeesFiltered.map((employee) => {
+                  const hasAccess = hasAccessToEmployee(employee.id);
+                  const pendingOwnRequest = getPendingRequestForEmployee(employee.id);
+                  const requestsForEmployee = pendingAccessRequests.filter((request) => request.employeeId === employee.id);
+
+                  return (
+                    <div key={employee.id} className="rounded-2xl border border-slate-200 dark:border-slate-800 p-3">
+                      <div className="font-medium">{employee.name}</div>
+                      <div className="text-sm text-slate-500 dark:text-slate-400">{employee.grade}</div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {hasAccess ? (
+                          <Badge variant="secondary">Уже есть доступ</Badge>
+                        ) : pendingOwnRequest ? (
+                          <Badge variant="secondary">Запрос отправлен</Badge>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={requestingEmployeeId === employee.id}
+                            onClick={() => requestAccessToEmployee(employee.id)}
+                          >
+                            {requestingEmployeeId === employee.id ? "Отправляю..." : "Запросить права"}
+                          </Button>
+                        )}
+                        {requestsForEmployee.map((request) =>
+                          canApproveRequest(employee.id) && request.requesterCuratorId !== currentUser.id ? (
+                            <Button
+                              key={request.id}
+                              size="sm"
+                              onClick={() => approveAccessRequest(request)}
+                              disabled={approvingRequestId === request.id}
+                            >
+                              {approvingRequestId === request.id ? "Одобряю..." : "Одобрить запрос"}
+                            </Button>
+                          ) : null
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
 
         <div className="space-y-6">
-          <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 dark:border-slate-800 bg-white dark:bg-slate-900">
+          <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
             <CardContent className="p-6">
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-[260px_minmax(0,1fr)] xl:min-h-[132px]">
                 <div className="flex min-h-[84px] flex-col justify-start overflow-hidden">
@@ -1580,39 +1795,7 @@ const saveAllToDb = async () => {
                 </div>
 
                 <div className="grid gap-4 xl:grid-rows-[auto_auto]">
-                  <div className="grid gap-3 xl:grid-cols-[110px_140px_150px_210px] xl:items-end">
-                    <div className="flex flex-col gap-2">
-                      <Label>Год</Label>
-                      <Select value={selectedYear} onValueChange={handleYearChange}>
-                        <SelectTrigger className={`w-[110px] ${HEADER_CONTROL_CLASS}`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableYears.map((yearOption) => (
-                            <SelectItem key={yearOption} value={yearOption}>
-                              {yearOption}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="flex flex-col gap-2">
-                      <Label>Встреча</Label>
-                      <Select value={selectedMeetingNumber} onValueChange={handleMeetingChange}>
-                        <SelectTrigger className={`w-[140px] ${HEADER_CONTROL_CLASS}`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableMeetings.map((session) => (
-                            <SelectItem key={session.id} value={session.meetingNumber}>
-                              №{session.meetingNumber}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
+                  <div className="grid gap-3 xl:grid-cols-[150px_210px_170px] xl:items-end">
                     <div className="flex flex-col gap-2">
                       <Label className="opacity-0">.</Label>
                       <Button variant="outline" onClick={handleCreateMeeting} className={`w-[150px] justify-center ${HEADER_CONTROL_CLASS}`}>
@@ -1646,6 +1829,22 @@ const saveAllToDb = async () => {
                         <div className="h-10 w-[210px]" />
                       )}
                     </div>
+
+                    <div className="flex flex-col gap-2">
+                      <Label>Встреча</Label>
+                      <Select value={selectedMeetingNumber} onValueChange={handleMeetingChange}>
+                        <SelectTrigger className={`w-[170px] ${HEADER_CONTROL_CLASS}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableMeetings.map((session) => (
+                            <SelectItem key={session.id} value={session.meetingNumber}>
+                              №{session.meetingNumber} · {session.meetingDate.split("-").reverse().join(".")}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
 
                   <div className="grid gap-3 xl:grid-cols-[170px] xl:items-end">
@@ -1669,12 +1868,17 @@ const saveAllToDb = async () => {
             </CardContent>
           </Card>
 
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="grid items-center gap-3 md:grid-cols-[1fr_auto_1fr]">
             <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
               <Briefcase className="h-4 w-4" />
               {projects.length} проекта(ов) в review
             </div>
-            {dirty ? <Badge>Есть несохранённые изменения</Badge> : <Badge variant="secondary">Всё сохранено</Badge>}
+            {dirty ? (
+              <Badge className="justify-self-center border-0 bg-red-600 px-4 py-1 text-white hover:bg-red-600">Есть несохранённые изменения</Badge>
+            ) : (
+              <Badge className="justify-self-center border-0 bg-emerald-600 px-4 py-1 text-white hover:bg-emerald-600">Всё сохранено</Badge>
+            )}
+            <div />
           </div>
 
           <Tabs defaultValue="profile" className="space-y-4">
@@ -1685,14 +1889,14 @@ const saveAllToDb = async () => {
             </TabsList>
 
             <TabsContent value="profile">
-              <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 dark:border-slate-800 bg-white dark:bg-slate-900">
+              <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
                 <CardHeader className="gap-4">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="space-y-3">
                       <CardTitle className="text-lg">Оценка по проектам</CardTitle>
                       <div className="flex flex-wrap gap-2">
                         {projects.map((project) => (
-                          <div key={project.id} className="flex items-center gap-2 rounded-full border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 px-3 py-1 text-sm">
+                          <div key={project.id} className="flex items-center gap-2 rounded-full border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 px-3 py-1 text-sm">
                             <span>{project.name}</span>
                             <button
                               type="button"
@@ -1744,7 +1948,7 @@ const saveAllToDb = async () => {
                       </Button>
 
                       {showCreateProjectForm && (
-                        <div className="space-y-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 dark:bg-slate-950 p-4">
+                        <div className="space-y-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-4">
                           <div className="grid gap-3 sm:grid-cols-2">
                             <div>
                               <Label className="mb-2 block">Название проекта</Label>
@@ -1811,7 +2015,7 @@ const saveAllToDb = async () => {
                               <div className="font-semibold">{metric.name}</div>
                             </div>
 
-                            <div className="text-sm text-slate-600 dark:text-slate-300 dark:text-slate-600">
+                            <div className="text-sm text-slate-600 dark:text-slate-300">
                               <ul className="space-y-1">
                                 {metric.hints.map((hint) => (
                                   <li key={hint}>• {hint}</li>
@@ -1867,7 +2071,7 @@ const saveAllToDb = async () => {
             </TabsContent>
 
             <TabsContent value="skills">
-              <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 dark:border-slate-800 bg-white dark:bg-slate-900">
+              <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <Star className="h-5 w-5" />
@@ -1880,7 +2084,7 @@ const saveAllToDb = async () => {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {employeeSkills.map((skill, index) => (
-                    <div key={skill.id} className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 dark:border-slate-800 p-3">
+                    <div key={skill.id} className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 p-3">
                       <div className="w-8 text-sm text-slate-500 dark:text-slate-400">{index + 1}</div>
                       <Input value={skill.name} onChange={(e) => updateSkill(skill.id, e.target.value)} placeholder="Название навыка" />
                       <Button variant="ghost" size="icon" onClick={() => removeSkill(skill.id)}>
@@ -1893,7 +2097,7 @@ const saveAllToDb = async () => {
             </TabsContent>
 
             <TabsContent value="feedback">
-              <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 dark:border-slate-800 bg-white dark:bg-slate-900">
+              <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle className="text-lg">360 feedback</CardTitle>
                   <Button variant="outline" onClick={addFeedback}>
@@ -1903,7 +2107,7 @@ const saveAllToDb = async () => {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {feedback.map((item, index) => (
-                    <div key={item.id} className="rounded-2xl border border-slate-200 dark:border-slate-800 dark:border-slate-800 p-4">
+                    <div key={item.id} className="rounded-2xl border border-slate-200 dark:border-slate-800 p-4">
                       <div className="mb-4 flex items-center justify-between">
                         <div className="font-medium">Ответ #{index + 1}</div>
                         <Button variant="ghost" size="icon" onClick={() => removeFeedback(item.id)}>
