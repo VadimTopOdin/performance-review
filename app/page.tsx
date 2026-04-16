@@ -198,6 +198,7 @@ const createReviewSession = ({
   scores,
   skills,
   feedback,
+  growthAreas,
 }: {
   meetingNumber: string;
   meetingDate: string;
@@ -206,7 +207,7 @@ const createReviewSession = ({
   scores: SessionScores;
   skills: Skill[];
   feedback: FeedbackItem[];
-  growthAreas: GrowthItem[];
+  growthAreas: GrowthArea[];
 }): ReviewSession => ({
   id: `${meetingDate}-${meetingNumber}`,
   meetingNumber,
