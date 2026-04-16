@@ -53,6 +53,11 @@ type Skill = {
   name: string;
 };
 
+type GrowthItem = {
+  id: string;
+  text: string;
+};
+
 type FeedbackItem = {
   id: string;
   projectId: string;
@@ -74,6 +79,7 @@ type ReviewSession = {
   scores: SessionScores;
   skills: Skill[];
   feedback: FeedbackItem[];
+  growthAreas: GrowthItem[];
 };
 
 type EmployeeReviewBucket = {
@@ -200,6 +206,7 @@ const createReviewSession = ({
   scores: SessionScores;
   skills: Skill[];
   feedback: FeedbackItem[];
+  growthAreas: GrowthItem[];
 }): ReviewSession => ({
   id: `${meetingDate}-${meetingNumber}`,
   meetingNumber,
@@ -209,6 +216,7 @@ const createReviewSession = ({
   scores,
   skills,
   feedback,
+  growthAreas,
 });
 
 const initialEmployeeReviewMap: Record<string, EmployeeReviewBucket> = {};
@@ -324,6 +332,17 @@ type DbEmployeeSkill = {
   id: number;
   employee_id: string;
   skill_name: string;
+};
+
+type DbSkillCatalog = {
+  id: number;
+  name: string;
+};
+
+type DbGrowthArea = {
+  id: number;
+  review_session_id: number;
+  text: string | null;
 };
 
 type DbFeedback = {
@@ -451,6 +470,8 @@ export default function PerformanceReviewUiMvp() {
   const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
   const [requestingEmployeeId, setRequestingEmployeeId] = useState<string | null>(null);
   const [approvingRequestId, setApprovingRequestId] = useState<number | null>(null);
+  const [skillOptions, setSkillOptions] = useState<string[]>(["SQL", "Python", "SAS", "Power BI", "Databricks"]);
+  const [newSkillOption, setNewSkillOption] = useState("");
 
   const currentUser = useMemo(() => ({
     id: currentUserId || "",
@@ -617,6 +638,8 @@ useEffect(() => {
       employeeSkillsRes,
       feedbackRes,
       accessRequestsRes,
+      skillCatalogRes,
+      growthAreasRes,
     ] = await Promise.all([
       supabase.from("employees").select("id, full_name, grade").order("id"),
       supabase.from("curators").select("id, email, name, role").order("name"),
@@ -641,6 +664,8 @@ useEffect(() => {
         .from("access_requests")
         .select("id, employee_id, requester_curator_id, target_curator_id, status, created_at")
         .order("created_at", { ascending: false }),
+      supabase.from("skill_catalog").select("id, name").order("name"),
+      supabase.from("growth_areas").select("id, review_session_id, text").order("id"),
     ]);
 
     const errors = [
@@ -654,6 +679,8 @@ useEffect(() => {
       employeeSkillsRes.error,
       feedbackRes.error,
       accessRequestsRes.error,
+      skillCatalogRes.error,
+      growthAreasRes.error,
     ].filter(Boolean);
 
     if (errors.length) {
@@ -702,6 +729,7 @@ useEffect(() => {
         scores: {},
         skills: [],
         feedback: [],
+        growthAreas: [],
       };
 
       if (!bucketMap[row.employee_id]) bucketMap[row.employee_id] = emptyBucket();
@@ -753,6 +781,15 @@ useEffect(() => {
       });
     });
 
+    ((growthAreasRes.data as DbGrowthArea[]) || []).forEach((row) => {
+      const session = sessionMap.get(row.review_session_id);
+      if (!session) return;
+      session.growthAreas.push({
+        id: String(row.id),
+        text: row.text || "",
+      });
+    });
+
     const nextAccessRequests: AccessRequest[] = ((accessRequestsRes.data as DbAccessRequest[]) || []).map((row) => ({
       id: row.id,
       employeeId: row.employee_id,
@@ -772,6 +809,7 @@ useEffect(() => {
     setAllProjectOptions(nextProjects.length ? nextProjects : initialAllProjectOptions);
     setEmployeeReviewMap(bucketMap);
     setAccessRequests(nextAccessRequests);
+    setSkillOptions(((skillCatalogRes.data as DbSkillCatalog[]) || []).map((row) => row.name));
     setLoading(false);
   };
 
@@ -880,6 +918,7 @@ useEffect(() => {
       scores: {},
       skills: [],
       feedback: [],
+      growthAreas: [],
     });
 
     setEmployeeReviewMap((prev) => ({
@@ -1108,6 +1147,41 @@ useEffect(() => {
     updateEmployeeSkills((skills) => skills.filter((item) => item.id !== id));
   };
 
+  const addSkillOption = async () => {
+    const value = newSkillOption.trim();
+    if (!value) return;
+    try {
+      const { error } = await supabase.from("skill_catalog").insert({ name: value });
+      if (error && !String(error.message || "").toLowerCase().includes("duplicate")) throw error;
+      setSkillOptions((prev) => Array.from(new Set([...prev, value])).sort((a, b) => a.localeCompare(b)));
+      setNewSkillOption("");
+    } catch (error) {
+      console.error(error);
+      alert("Не удалось добавить навык в справочник");
+    }
+  };
+
+  const addGrowthArea = () => {
+    updateCurrentSession((session) => ({
+      ...session,
+      growthAreas: [...(session.growthAreas || []), { id: crypto.randomUUID(), text: "" }],
+    }));
+  };
+
+  const updateGrowthArea = (id: string, value: string) => {
+    updateCurrentSession((session) => ({
+      ...session,
+      growthAreas: (session.growthAreas || []).map((item) => (item.id === id ? { ...item, text: value } : item)),
+    }));
+  };
+
+  const removeGrowthArea = (id: string) => {
+    updateCurrentSession((session) => ({
+      ...session,
+      growthAreas: (session.growthAreas || []).filter((item) => item.id !== id),
+    }));
+  };
+
   const addFeedback = () => {
     updateCurrentSession((session) => ({
       ...session,
@@ -1273,6 +1347,14 @@ const saveAllToDb = async () => {
       if (upsertProjectsError) throw upsertProjectsError;
     }
 
+    const uniqueSkillOptions = Array.from(new Set(skillOptions.map((item) => item.trim()).filter(Boolean)));
+    if (uniqueSkillOptions.length) {
+      const { error: skillCatalogError } = await supabase
+        .from("skill_catalog")
+        .upsert(uniqueSkillOptions.map((name) => ({ name })), { onConflict: "name" });
+      if (skillCatalogError) throw skillCatalogError;
+    }
+
     const sessionPayload = {
       employee_id: selectedEmployeeId,
       meeting_number: Number(currentSession.meetingNumber),
@@ -1343,6 +1425,16 @@ const saveAllToDb = async () => {
     if (feedbackRows.length) {
       const { error: feedbackError } = await supabase.from("session_feedback").insert(feedbackRows);
       if (feedbackError) throw feedbackError;
+    }
+
+    await supabase.from("growth_areas").delete().eq("review_session_id", reviewSessionId);
+    const growthRows = (currentSession.growthAreas || [])
+      .map((item) => item.text.trim())
+      .filter(Boolean)
+      .map((text) => ({ review_session_id: reviewSessionId, text }));
+    if (growthRows.length) {
+      const { error: growthError } = await supabase.from("growth_areas").insert(growthRows);
+      if (growthError) throw growthError;
     }
 
     setEmployeeReviewMap((prev) => ({
@@ -1882,10 +1974,11 @@ const saveAllToDb = async () => {
           </div>
 
           <Tabs defaultValue="profile" className="space-y-4">
-            <TabsList className="grid w-full grid-cols-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+            <TabsList className="grid w-full grid-cols-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
               <TabsTrigger value="profile">Перформанс-профиль</TabsTrigger>
               <TabsTrigger value="skills">Уникальные навыки</TabsTrigger>
               <TabsTrigger value="feedback">360</TabsTrigger>
+              <TabsTrigger value="growth">Зоны роста</TabsTrigger>
             </TabsList>
 
             <TabsContent value="profile">
@@ -2082,16 +2175,73 @@ const saveAllToDb = async () => {
                     Добавить
                   </Button>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="space-y-4">
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-4">
+                    <div className="mb-2 text-sm font-medium">Справочник навыков</div>
+                    <div className="flex gap-2">
+                      <Input
+                        value={newSkillOption}
+                        onChange={(e) => setNewSkillOption(e.target.value)}
+                        placeholder="Добавить навык в общий список"
+                      />
+                      <Button variant="outline" onClick={addSkillOption} disabled={!newSkillOption.trim()}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        В справочник
+                      </Button>
+                    </div>
+                  </div>
+
                   {employeeSkills.map((skill, index) => (
-                    <div key={skill.id} className="flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 p-3">
-                      <div className="w-8 text-sm text-slate-500 dark:text-slate-400">{index + 1}</div>
-                      <Input value={skill.name} onChange={(e) => updateSkill(skill.id, e.target.value)} placeholder="Название навыка" />
-                      <Button variant="ghost" size="icon" onClick={() => removeSkill(skill.id)}>
+                    <div key={skill.id} className="rounded-2xl border border-slate-200 dark:border-slate-800 p-3 space-y-3">
+                      <div className="text-sm text-slate-500 dark:text-slate-400">{index + 1}</div>
+                      <div className="grid gap-3 md:grid-cols-[220px_1fr_auto] md:items-start">
+                        <Select value={skillOptions.includes(skill.name) ? skill.name : "__custom__"} onValueChange={(value) => {
+                          if (value !== "__custom__") updateSkill(skill.id, value);
+                        }}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Выбери навык" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {skillOptions.map((option) => (
+                              <SelectItem key={option} value={option}>{option}</SelectItem>
+                            ))}
+                            <SelectItem value="__custom__">Свой вариант</SelectItem>
+                          </SelectContent>
+                        </Select>
+
+                        <Input value={skill.name} onChange={(e) => updateSkill(skill.id, e.target.value)} placeholder="Или впиши свой навык" />
+                        <Button variant="ghost" size="icon" onClick={() => removeSkill(skill.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="growth">
+              <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle className="text-lg">Зоны роста</CardTitle>
+                  <Button variant="outline" onClick={addGrowthArea}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Добавить
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {(currentSession?.growthAreas || []).map((item, index) => (
+                    <div key={item.id} className="flex items-start gap-3 rounded-2xl border border-slate-200 dark:border-slate-800 p-3">
+                      <div className="w-8 pt-2 text-sm text-slate-500 dark:text-slate-400">{index + 1}</div>
+                      <Textarea value={item.text} onChange={(e) => updateGrowthArea(item.id, e.target.value)} placeholder="Что прокачать / что подтянуть" className="min-h-[90px]" />
+                      <Button variant="ghost" size="icon" onClick={() => removeGrowthArea(item.id)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   ))}
+                  {!(currentSession?.growthAreas || []).length ? (
+                    <div className="rounded-2xl border border-dashed p-8 text-center text-slate-500 dark:text-slate-400">Пока нет зон роста. Добавь сверху.</div>
+                  ) : null}
                 </CardContent>
               </Card>
             </TabsContent>
