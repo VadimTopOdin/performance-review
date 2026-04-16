@@ -495,6 +495,16 @@ export default function PerformanceReviewUiMvp() {
     return curatorAccessMap[currentUserId] || [];
   }, [curatorAccessMap, currentUserId, currentUserRole, employees]);
 
+  const employeeSkillsMap = useMemo(() => {
+    const map: Record<string, string[]> = {};
+
+    Object.entries(employeeReviewMap).forEach(([employeeId, bucket]) => {
+      map[employeeId] = (bucket.skills || []).map((skill) => skill.name);
+    });
+
+    return map;
+  }, [employeeReviewMap]);
+
   const filteredEmployees = useMemo(() => {
     const base = employees.filter((employee) => allowedIds.includes(employee.id));
     const q = search.trim().toLowerCase();
@@ -502,17 +512,27 @@ export default function PerformanceReviewUiMvp() {
     if (!q) return base;
 
     return base.filter((employee) => {
-      return employee.name.toLowerCase().includes(q) || employee.grade.toLowerCase().includes(q);
+      const employeeSkills = employeeSkillsMap[employee.id] || [];
+      return (
+        employee.name.toLowerCase().includes(q) ||
+        employee.grade.toLowerCase().includes(q) ||
+        employeeSkills.some((skill) => skill.toLowerCase().includes(q))
+      );
     });
-  }, [allowedIds, search, employees]);
+  }, [allowedIds, search, employees, employeeSkillsMap]);
 
   const allEmployeesFiltered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return employees;
-    return employees.filter((employee) =>
-      employee.name.toLowerCase().includes(q) || employee.grade.toLowerCase().includes(q)
-    );
-  }, [employees, search]);
+    return employees.filter((employee) => {
+      const employeeSkills = employeeSkillsMap[employee.id] || [];
+      return (
+        employee.name.toLowerCase().includes(q) ||
+        employee.grade.toLowerCase().includes(q) ||
+        employeeSkills.some((skill) => skill.toLowerCase().includes(q))
+      );
+    });
+  }, [employees, search, employeeSkillsMap]);
 
   const pendingAccessRequests = useMemo(
     () => accessRequests.filter((request) => request.status === "pending"),
@@ -1813,6 +1833,15 @@ const saveAllToDb = async () => {
                     <div key={employee.id} className="rounded-2xl border border-slate-200 dark:border-slate-800 p-3">
                       <div className="font-medium">{employee.name}</div>
                       <div className="text-sm text-slate-500 dark:text-slate-400">{employee.grade}</div>
+                      {(employeeSkillsMap[employee.id] || []).length ? (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {(employeeSkillsMap[employee.id] || []).slice(0, 8).map((skill) => (
+                            <Badge key={skill} variant="secondary" className="text-xs">
+                              {skill}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : null}
                       <div className="mt-3 flex flex-wrap gap-2">
                         {hasAccess ? (
                           <Badge variant="secondary">Уже есть доступ</Badge>
