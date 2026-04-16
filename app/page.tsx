@@ -53,6 +53,11 @@ type Skill = {
   name: string;
 };
 
+type GrowthArea = {
+  id: string;
+  text: string;
+};
+
 type GrowthItem = {
   id: string;
   text: string;
