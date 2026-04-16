@@ -505,34 +505,48 @@ export default function PerformanceReviewUiMvp() {
     return map;
   }, [employeeReviewMap]);
 
+  const normalizedSearch = search.trim().toLowerCase();
+
+  const matchedEmployeeSkillsMap = useMemo(() => {
+    const map: Record<string, string[]> = {};
+
+    if (!normalizedSearch) return map;
+
+    Object.entries(employeeSkillsMap).forEach(([employeeId, skills]) => {
+      const matched = skills.filter((skill) => skill.toLowerCase().includes(normalizedSearch));
+      if (matched.length) {
+        map[employeeId] = matched;
+      }
+    });
+
+    return map;
+  }, [employeeSkillsMap, normalizedSearch]);
+
   const filteredEmployees = useMemo(() => {
     const base = employees.filter((employee) => allowedIds.includes(employee.id));
-    const q = search.trim().toLowerCase();
-
-    if (!q) return base;
+    if (!normalizedSearch) return base;
 
     return base.filter((employee) => {
       const employeeSkills = employeeSkillsMap[employee.id] || [];
       return (
-        employee.name.toLowerCase().includes(q) ||
-        employee.grade.toLowerCase().includes(q) ||
-        employeeSkills.some((skill) => skill.toLowerCase().includes(q))
+        employee.name.toLowerCase().includes(normalizedSearch) ||
+        employee.grade.toLowerCase().includes(normalizedSearch) ||
+        employeeSkills.some((skill) => skill.toLowerCase().includes(normalizedSearch))
       );
     });
-  }, [allowedIds, search, employees, employeeSkillsMap]);
+  }, [allowedIds, normalizedSearch, employees, employeeSkillsMap]);
 
   const allEmployeesFiltered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return employees;
+    if (!normalizedSearch) return employees;
     return employees.filter((employee) => {
       const employeeSkills = employeeSkillsMap[employee.id] || [];
       return (
-        employee.name.toLowerCase().includes(q) ||
-        employee.grade.toLowerCase().includes(q) ||
-        employeeSkills.some((skill) => skill.toLowerCase().includes(q))
+        employee.name.toLowerCase().includes(normalizedSearch) ||
+        employee.grade.toLowerCase().includes(normalizedSearch) ||
+        employeeSkills.some((skill) => skill.toLowerCase().includes(normalizedSearch))
       );
     });
-  }, [employees, search, employeeSkillsMap]);
+  }, [employees, normalizedSearch, employeeSkillsMap]);
 
   const pendingAccessRequests = useMemo(
     () => accessRequests.filter((request) => request.status === "pending"),
@@ -1833,9 +1847,9 @@ const saveAllToDb = async () => {
                     <div key={employee.id} className="rounded-2xl border border-slate-200 dark:border-slate-800 p-3">
                       <div className="font-medium">{employee.name}</div>
                       <div className="text-sm text-slate-500 dark:text-slate-400">{employee.grade}</div>
-                      {(employeeSkillsMap[employee.id] || []).length ? (
+                      {normalizedSearch && (matchedEmployeeSkillsMap[employee.id] || []).length ? (
                         <div className="mt-2 flex flex-wrap gap-1">
-                          {(employeeSkillsMap[employee.id] || []).slice(0, 8).map((skill) => (
+                          {(matchedEmployeeSkillsMap[employee.id] || []).slice(0, 8).map((skill) => (
                             <Badge key={skill} variant="secondary" className="text-xs">
                               {skill}
                             </Badge>
@@ -2210,14 +2224,15 @@ const saveAllToDb = async () => {
                     Добавить
                   </Button>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-4">
-                    <div className="mb-2 text-sm font-medium">Справочник навыков</div>
-                    <div className="flex gap-2">
+                <CardContent className="space-y-3">
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-3">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                      <div className="text-sm font-medium md:min-w-[150px]">Справочник навыков</div>
                       <Input
                         value={newSkillOption}
                         onChange={(e) => setNewSkillOption(e.target.value)}
                         placeholder="Добавить навык в общий список"
+                        className="md:flex-1"
                       />
                       <Button variant="outline" onClick={addSkillOption} disabled={!newSkillOption.trim()}>
                         <Plus className="mr-2 h-4 w-4" />
@@ -2227,9 +2242,9 @@ const saveAllToDb = async () => {
                   </div>
 
                   {employeeSkills.map((skill, index) => (
-                    <div key={skill.id} className="rounded-2xl border border-slate-200 dark:border-slate-800 p-3 space-y-3">
-                      <div className="text-sm text-slate-500 dark:text-slate-400">{index + 1}</div>
-                      <div className="grid gap-3 md:grid-cols-[220px_1fr_auto] md:items-start">
+                    <div key={skill.id} className="rounded-2xl border border-slate-200 dark:border-slate-800 p-3">
+                      <div className="grid gap-2 md:grid-cols-[28px_220px_1fr_auto] md:items-center">
+                        <div className="text-sm text-slate-500 dark:text-slate-400">{index + 1}</div>
                         <Select value={skillOptions.includes(skill.name) ? skill.name : "__custom__"} onValueChange={(value) => {
                           if (value !== "__custom__") updateSkill(skill.id, value);
                         }}>
