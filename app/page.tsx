@@ -29,6 +29,7 @@ import {
   Moon,
   Sun,
   Pencil,
+  DollarSign,
 } from "lucide-react";
 import Image from "next/image";
 
@@ -74,6 +75,15 @@ type FeedbackItem = {
   comment: string;
 };
 
+type FinancialKpiItem = {
+  id: string;
+  name: string;
+  unit: string;
+  planValue: string;
+  factValue: string;
+  comment: string;
+};
+
 type ReviewSession = {
   id: string;
   dbId?: number;
@@ -85,6 +95,7 @@ type ReviewSession = {
   skills: Skill[];
   feedback: FeedbackItem[];
   growthAreas: GrowthItem[];
+  financialKpis: FinancialKpiItem[];
 };
 
 type EmployeeReviewBucket = {
@@ -96,6 +107,7 @@ type Employee = {
   id: string;
   name: string;
   grade: string;
+  hasFinancialKpi: boolean;
 };
 
 const levelOptions: Level[] = ["junior", "mid", "strong_mid", "senior", "lead"];
@@ -204,6 +216,7 @@ const createReviewSession = ({
   skills,
   feedback,
   growthAreas,
+  financialKpis,
 }: {
   meetingNumber: string;
   meetingDate: string;
@@ -213,6 +226,7 @@ const createReviewSession = ({
   skills: Skill[];
   feedback: FeedbackItem[];
   growthAreas: GrowthArea[];
+  financialKpis: FinancialKpiItem[];
 }): ReviewSession => ({
   id: `${meetingDate}-${meetingNumber}`,
   meetingNumber,
@@ -223,6 +237,7 @@ const createReviewSession = ({
   skills,
   feedback,
   growthAreas,
+  financialKpis,
 });
 
 const initialEmployeeReviewMap: Record<string, EmployeeReviewBucket> = {};
@@ -294,6 +309,7 @@ type DbEmployee = {
   id: string;
   full_name: string;
   grade: string | null;
+  has_financial_kpi: boolean | null;
 };
 
 type DbCuratorAccess = {
@@ -360,6 +376,16 @@ type DbFeedback = {
   comfort: string | null;
   pull: string | null;
   trust: string | null;
+  comment: string | null;
+};
+
+type DbFinancialKpi = {
+  id: number;
+  review_session_id: number;
+  kpi_name: string | null;
+  unit: string | null;
+  plan_value: string | null;
+  fact_value: string | null;
   comment: string | null;
 };
 
@@ -465,11 +491,13 @@ export default function PerformanceReviewUiMvp() {
   const [showAddEmployeeForm, setShowAddEmployeeForm] = useState(false);
   const [newEmployeeName, setNewEmployeeName] = useState("");
   const [newEmployeeGrade, setNewEmployeeGrade] = useState("");
+  const [newEmployeeHasFinancialKpi, setNewEmployeeHasFinancialKpi] = useState(false);
   const [addingEmployee, setAddingEmployee] = useState(false);
   const [deletingEmployee, setDeletingEmployee] = useState(false);
   const [showEditEmployeeForm, setShowEditEmployeeForm] = useState(false);
   const [editEmployeeName, setEditEmployeeName] = useState("");
   const [editEmployeeGrade, setEditEmployeeGrade] = useState("");
+  const [editEmployeeHasFinancialKpi, setEditEmployeeHasFinancialKpi] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [employeeListTab, setEmployeeListTab] = useState<"mine" | "all">("mine");
@@ -677,11 +705,12 @@ useEffect(() => {
       metricScoresRes,
       employeeSkillsRes,
       feedbackRes,
+      financialKpisRes,
       accessRequestsRes,
       skillCatalogRes,
       growthAreasRes,
     ] = await Promise.all([
-      supabase.from("employees").select("id, full_name, grade").order("id"),
+      supabase.from("employees").select("id, full_name, grade, has_financial_kpi").order("id"),
       supabase.from("curators").select("id, email, name, role").order("name"),
       supabase.from("curator_access").select("curator_id, employee_id"),
       supabase.from("projects").select("id, name").order("name"),
@@ -701,6 +730,10 @@ useEffect(() => {
           "id, review_session_id, project_id, respondent_name, respondent_role, comfort, pull, trust, comment"
         ),
       supabase
+        .from("session_financial_kpis")
+        .select("id, review_session_id, kpi_name, unit, plan_value, fact_value, comment")
+        .order("id"),
+      supabase
         .from("access_requests")
         .select("id, employee_id, requester_curator_id, target_curator_id, status, created_at")
         .order("created_at", { ascending: false }),
@@ -718,6 +751,7 @@ useEffect(() => {
       metricScoresRes.error,
       employeeSkillsRes.error,
       feedbackRes.error,
+      financialKpisRes.error,
       accessRequestsRes.error,
       skillCatalogRes.error,
       growthAreasRes.error,
@@ -733,6 +767,7 @@ useEffect(() => {
       id: employee.id,
       name: employee.full_name,
       grade: employee.grade || "",
+      hasFinancialKpi: Boolean(employee.has_financial_kpi),
     }));
 
     const nextCuratorOptions = ((curatorsRes.data as DbCurator[]) || []).map((curator) => ({
@@ -770,6 +805,7 @@ useEffect(() => {
         skills: [],
         feedback: [],
         growthAreas: [],
+        financialKpis: [],
       };
 
       if (!bucketMap[row.employee_id]) bucketMap[row.employee_id] = emptyBucket();
@@ -817,6 +853,19 @@ useEffect(() => {
         comfort: row.comfort || "",
         pull: row.pull || "",
         trust: row.trust || "",
+        comment: row.comment || "",
+      });
+    });
+
+    ((financialKpisRes.data as DbFinancialKpi[]) || []).forEach((row) => {
+      const session = sessionMap.get(row.review_session_id);
+      if (!session) return;
+      session.financialKpis.push({
+        id: String(row.id),
+        name: row.kpi_name || "",
+        unit: row.unit || "%",
+        planValue: row.plan_value || "",
+        factValue: row.fact_value || "",
         comment: row.comment || "",
       });
     });
@@ -879,12 +928,14 @@ useEffect(() => {
     if (!selectedEmployee) {
       setEditEmployeeName("");
       setEditEmployeeGrade("");
+      setEditEmployeeHasFinancialKpi(false);
       return;
     }
 
     setEditEmployeeName(selectedEmployee.name || "");
     setEditEmployeeGrade(selectedEmployee.grade || "");
-  }, [selectedEmployeeId, selectedEmployee?.name, selectedEmployee?.grade]);
+    setEditEmployeeHasFinancialKpi(Boolean(selectedEmployee.hasFinancialKpi));
+  }, [selectedEmployeeId, selectedEmployee?.name, selectedEmployee?.grade, selectedEmployee?.hasFinancialKpi]);
 
   const employeeSessions = employeeReviewMap[selectedEmployeeId]?.sessions || [];
 
@@ -959,6 +1010,7 @@ useEffect(() => {
       skills: [],
       feedback: [],
       growthAreas: [],
+      financialKpis: [],
     });
 
     setEmployeeReviewMap((prev) => ({
@@ -1256,11 +1308,75 @@ useEffect(() => {
   };
 
 
+const updateSelectedEmployeeFinancialToggle = async (value: boolean) => {
+  if (!selectedEmployeeId) return;
+
+  try {
+    const { error } = await supabase
+      .from("employees")
+      .update({ has_financial_kpi: value })
+      .eq("id", selectedEmployeeId);
+
+    if (error) throw error;
+
+    setEmployees((prev) =>
+      prev.map((employee) =>
+        employee.id === selectedEmployeeId ? { ...employee, hasFinancialKpi: value } : employee
+      )
+    );
+  } catch (error) {
+    console.error(error);
+    alert("Не удалось обновить флаг фин. KPI");
+  }
+};
+
+const addFinancialKpi = () => {
+  updateCurrentSession((session) => ({
+    ...session,
+    financialKpis: [
+      ...(session.financialKpis || []),
+      {
+        id: crypto.randomUUID(),
+        name: "",
+        unit: "%",
+        planValue: "",
+        factValue: "",
+        comment: "",
+      },
+    ],
+  }));
+};
+
+const updateFinancialKpi = (id: string, field: keyof FinancialKpiItem, value: string) => {
+  updateCurrentSession((session) => ({
+    ...session,
+    financialKpis: (session.financialKpis || []).map((item) =>
+      item.id === id ? { ...item, [field]: value } : item
+    ),
+  }));
+};
+
+const removeFinancialKpi = (id: string) => {
+  updateCurrentSession((session) => ({
+    ...session,
+    financialKpis: (session.financialKpis || []).filter((item) => item.id !== id),
+  }));
+};
+
+const getFinancialKpiCompletion = (item: FinancialKpiItem) => {
+  const plan = Number(String(item.planValue).replace(",", "."));
+  const fact = Number(String(item.factValue).replace(",", "."));
+
+  if (!Number.isFinite(plan) || !Number.isFinite(fact) || plan === 0) return null;
+  return (fact / plan) * 100;
+};
+
 const updateSelectedEmployee = async () => {
   if (!selectedEmployeeId || !selectedEmployee) return;
 
   const fullName = editEmployeeName.trim();
   const grade = editEmployeeGrade.trim();
+  const hasFinancialKpi = editEmployeeHasFinancialKpi;
   if (!fullName) return;
 
   try {
@@ -1268,14 +1384,16 @@ const updateSelectedEmployee = async () => {
 
     const { error } = await supabase
       .from("employees")
-      .update({ full_name: fullName, grade: grade || null })
+      .update({ full_name: fullName, grade: grade || null, has_financial_kpi: hasFinancialKpi })
       .eq("id", selectedEmployeeId);
 
     if (error) throw error;
 
     setEmployees((prev) =>
       prev.map((employee) =>
-        employee.id === selectedEmployeeId ? { ...employee, name: fullName, grade: grade || "" } : employee
+        employee.id === selectedEmployeeId
+          ? { ...employee, name: fullName, grade: grade || "", hasFinancialKpi }
+          : employee
       )
     );
 
@@ -1292,6 +1410,7 @@ const updateSelectedEmployee = async () => {
 const addNewEmployee = async () => {
   const fullName = newEmployeeName.trim();
   const grade = newEmployeeGrade.trim();
+  const hasFinancialKpi = newEmployeeHasFinancialKpi;
   if (!fullName) return;
 
   try {
@@ -1302,6 +1421,7 @@ const addNewEmployee = async () => {
       id: employeeId,
       full_name: fullName,
       grade: grade || null,
+      has_financial_kpi: hasFinancialKpi,
     });
     if (employeeError) throw employeeError;
 
@@ -1311,7 +1431,7 @@ const addNewEmployee = async () => {
     });
     if (accessError) throw accessError;
 
-    const newEmployee = { id: employeeId, name: fullName, grade: grade || "" };
+    const newEmployee = { id: employeeId, name: fullName, grade: grade || "", hasFinancialKpi };
     setEmployees((prev) => [...prev, newEmployee]);
     setCuratorAccessMap((prev) => ({
       ...prev,
@@ -1325,6 +1445,7 @@ const addNewEmployee = async () => {
     setShowAddEmployeeForm(false);
     setNewEmployeeName("");
     setNewEmployeeGrade("");
+    setNewEmployeeHasFinancialKpi(false);
   } catch (error) {
     console.error(error);
     alert("Не удалось добавить сотрудника.");
@@ -1475,6 +1596,22 @@ const saveAllToDb = async () => {
     if (growthRows.length) {
       const { error: growthError } = await supabase.from("growth_areas").insert(growthRows);
       if (growthError) throw growthError;
+    }
+
+    await supabase.from("session_financial_kpis").delete().eq("review_session_id", reviewSessionId);
+    const financialRows = (currentSession.financialKpis || [])
+      .map((item) => ({
+        review_session_id: reviewSessionId,
+        kpi_name: item.name.trim() || null,
+        unit: item.unit.trim() || null,
+        plan_value: item.planValue.trim() || null,
+        fact_value: item.factValue.trim() || null,
+        comment: item.comment.trim() || null,
+      }))
+      .filter((item) => item.kpi_name || item.plan_value || item.fact_value || item.comment);
+    if (financialRows.length) {
+      const { error: financialError } = await supabase.from("session_financial_kpis").insert(financialRows);
+      if (financialError) throw financialError;
     }
 
     setEmployeeReviewMap((prev) => ({
@@ -1700,6 +1837,14 @@ const saveAllToDb = async () => {
                     </SelectContent>
                   </Select>
                 </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={newEmployeeHasFinancialKpi}
+                    onChange={(e) => setNewEmployeeHasFinancialKpi(e.target.checked)}
+                  />
+                  Есть финансовые KPI
+                </label>
                 <div className="flex gap-2">
                   <Button onClick={addNewEmployee} disabled={!newEmployeeName.trim() || addingEmployee}>
                     {addingEmployee ? "Добавляю..." : "Создать"}
@@ -1710,6 +1855,7 @@ const saveAllToDb = async () => {
                       setShowAddEmployeeForm(false);
                       setNewEmployeeName("");
                       setNewEmployeeGrade("");
+                      setNewEmployeeHasFinancialKpi(false);
                     }}
                   >
                     Отмена
@@ -1743,6 +1889,14 @@ const saveAllToDb = async () => {
                     </SelectContent>
                   </Select>
                 </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={editEmployeeHasFinancialKpi}
+                    onChange={(e) => setEditEmployeeHasFinancialKpi(e.target.checked)}
+                  />
+                  Есть финансовые KPI
+                </label>
                 <div className="flex gap-2">
                   <Button onClick={updateSelectedEmployee} disabled={!editEmployeeName.trim() || editingEmployee}>
                     {editingEmployee ? "Сохраняю..." : "Сохранить изменения"}
@@ -1753,6 +1907,7 @@ const saveAllToDb = async () => {
                       setShowEditEmployeeForm(false);
                       setEditEmployeeName(selectedEmployee?.name || "");
                       setEditEmployeeGrade(selectedEmployee?.grade || "");
+                      setEditEmployeeHasFinancialKpi(Boolean(selectedEmployee?.hasFinancialKpi));
                     }}
                   >
                     Отмена
@@ -1914,6 +2069,15 @@ const saveAllToDb = async () => {
                     </Button>
                   </div>
 
+                  <label className="mt-4 flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(selectedEmployee?.hasFinancialKpi)}
+                      onChange={(e) => updateSelectedEmployeeFinancialToggle(e.target.checked)}
+                    />
+                    Есть финансовые KPI
+                  </label>
+
                   <div className="mt-4 flex flex-col gap-2">
                     <Label>Общий уровень</Label>
                     <Select value={overallLevel} onValueChange={handleOverallLevelChange}>
@@ -2023,11 +2187,12 @@ const saveAllToDb = async () => {
           </div>
 
           <Tabs defaultValue="profile" className="space-y-4">
-            <TabsList className="grid w-full grid-cols-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+            <TabsList className={`grid w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 ${selectedEmployee?.hasFinancialKpi ? "grid-cols-5" : "grid-cols-4"}`}>
               <TabsTrigger value="profile">Перформанс-профиль</TabsTrigger>
               <TabsTrigger value="skills">Уникальные навыки</TabsTrigger>
               <TabsTrigger value="feedback">360</TabsTrigger>
               <TabsTrigger value="growth">Зоны роста</TabsTrigger>
+              {selectedEmployee?.hasFinancialKpi ? <TabsTrigger value="finance">Финансы</TabsTrigger> : null}
             </TabsList>
 
             <TabsContent value="profile">
@@ -2291,6 +2456,112 @@ const saveAllToDb = async () => {
                   ))}
                   {!(currentSession?.growthAreas || []).length ? (
                     <div className="rounded-2xl border border-dashed p-8 text-center text-slate-500 dark:text-slate-400">Пока нет зон роста. Добавь сверху.</div>
+                  ) : null}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+
+            <TabsContent value="finance">
+              <Card className="rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <DollarSign className="h-5 w-5" />
+                    Финансовые KPI
+                  </CardTitle>
+                  <Button variant="outline" onClick={addFinancialKpi}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Добавить
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {(currentSession?.financialKpis || []).map((item, index) => {
+                    const completion = getFinancialKpiCompletion(item);
+                    const completionTone =
+                      completion === null
+                        ? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        : completion < 80
+                        ? "bg-red-100 text-red-700"
+                        : completion <= 100
+                        ? "bg-amber-100 text-amber-700"
+                        : "bg-emerald-100 text-emerald-700";
+
+                    return (
+                      <div key={item.id} className="rounded-2xl border border-slate-200 dark:border-slate-800 p-4">
+                        <div className="mb-4 flex items-center justify-between gap-3">
+                          <div className="font-medium">Фин. KPI #{index + 1}</div>
+                          <div className="flex items-center gap-2">
+                            <Badge className={`border-0 ${completionTone}`}>
+                              {completion === null ? "% выполнения —" : `${completion.toFixed(0)}% выполнения`}
+                            </Badge>
+                            <Button variant="ghost" size="icon" onClick={() => removeFinancialKpi(item.id)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                          <div className="xl:col-span-2">
+                            <Label className="mb-2 block">Название KPI</Label>
+                            <Input
+                              value={item.name}
+                              onChange={(e) => updateFinancialKpi(item.id, "name", e.target.value)}
+                              placeholder="Например, Маржа / Выручка / Прибыль"
+                            />
+                          </div>
+
+                          <div>
+                            <Label className="mb-2 block">Единица</Label>
+                            <Select value={item.unit || "%"} onValueChange={(value) => updateFinancialKpi(item.id, "unit", value)}>
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="%">%</SelectItem>
+                                <SelectItem value="₸">₸</SelectItem>
+                                <SelectItem value="шт">шт</SelectItem>
+                                <SelectItem value="часы">часы</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div />
+
+                          <div>
+                            <Label className="mb-2 block">План</Label>
+                            <Input
+                              value={item.planValue}
+                              onChange={(e) => updateFinancialKpi(item.id, "planValue", e.target.value)}
+                              placeholder="Например, 35"
+                            />
+                          </div>
+
+                          <div>
+                            <Label className="mb-2 block">Факт</Label>
+                            <Input
+                              value={item.factValue}
+                              onChange={(e) => updateFinancialKpi(item.id, "factValue", e.target.value)}
+                              placeholder="Например, 31"
+                            />
+                          </div>
+
+                          <div className="md:col-span-2">
+                            <Label className="mb-2 block">Комментарий</Label>
+                            <Textarea
+                              value={item.comment}
+                              onChange={(e) => updateFinancialKpi(item.id, "comment", e.target.value)}
+                              placeholder="Пояснение по отклонению, контекст, что повлияло"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {!(currentSession?.financialKpis || []).length ? (
+                    <div className="rounded-2xl border border-dashed p-8 text-center text-slate-500 dark:text-slate-400">
+                      Финансовых KPI пока нет. Добавь сверху.
+                    </div>
                   ) : null}
                 </CardContent>
               </Card>
