@@ -2518,7 +2518,7 @@ const saveAllToDb = async () => {
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="%">%</SelectItem>
-                                <SelectItem value="₸">₸</SelectItem>
+                                <SelectItem value="Руб">Руб</SelectItem>
                                 <SelectItem value="шт">шт</SelectItem>
                                 <SelectItem value="часы">часы</SelectItem>
                               </SelectContent>
