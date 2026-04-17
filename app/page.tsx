@@ -465,6 +465,7 @@ export default function PerformanceReviewUiMvp() {
   };
   const [authUser, setAuthUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [userBootstrapLoading, setUserBootstrapLoading] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState("");
   const [currentUserRole, setCurrentUserRole] = useState<"admin" | "curator">("curator");
@@ -649,43 +650,49 @@ export default function PerformanceReviewUiMvp() {
         setCurrentUserId(null);
         setCurrentUserName("");
         setCurrentUserRole("curator");
+        setUserBootstrapLoading(false);
         return;
       }
 
-      const displayName = authUser.user_metadata?.full_name || authUser.email;
+      setUserBootstrapLoading(true);
 
-      const { data: existing, error: selectError } = await supabase
-        .from("curators")
-        .select("id, name, role")
-        .eq("email", authUser.email)
-        .maybeSingle();
+      try {
+        const displayName = authUser.user_metadata?.full_name || authUser.email;
 
-      if (selectError) {
-        console.error(selectError);
-        return;
+        const { data: existing, error: selectError } = await supabase
+          .from("curators")
+          .select("id, name, role")
+          .eq("email", authUser.email)
+          .maybeSingle();
+
+        if (selectError) throw selectError;
+
+        if (existing) {
+          setCurrentUserId(existing.id);
+          setCurrentUserName(existing.name || displayName);
+          setCurrentUserRole((existing.role as "admin" | "curator" | null) || "curator");
+          return;
+        }
+
+        const { data: inserted, error: insertError } = await supabase
+          .from("curators")
+          .insert({ email: authUser.email, name: displayName, role: "curator" })
+          .select("id, name, role")
+          .single();
+
+        if (insertError) throw insertError;
+
+        setCurrentUserId(inserted.id);
+        setCurrentUserName(inserted.name || displayName);
+        setCurrentUserRole((inserted.role as "admin" | "curator" | null) || "curator");
+      } catch (error) {
+        console.error(error);
+        setCurrentUserId(null);
+        setCurrentUserName("");
+        setCurrentUserRole("curator");
+      } finally {
+        setUserBootstrapLoading(false);
       }
-
-      if (existing) {
-        setCurrentUserId(existing.id);
-        setCurrentUserName(existing.name || displayName);
-        setCurrentUserRole((existing.role as "admin" | "curator" | null) || "curator");
-        return;
-      }
-
-      const { data: inserted, error: insertError } = await supabase
-        .from("curators")
-        .insert({ email: authUser.email, name: displayName, role: "curator" })
-        .select("id, name, role")
-        .single();
-
-      if (insertError) {
-        console.error(insertError);
-        return;
-      }
-
-      setCurrentUserId(inserted.id);
-      setCurrentUserName(inserted.name || displayName);
-      setCurrentUserRole((inserted.role as "admin" | "curator" | null) || "curator");
     };
 
     syncCurator();
@@ -1637,8 +1644,8 @@ const saveAllToDb = async () => {
   const tableMinWidth = `${220 + 280 + projects.length * 280 + Math.max(projects.length - 1, 0) * 16}px`;
   const tableColumns = `220px 280px repeat(${projects.length}, 280px)`;
 
-  if (authLoading) {
-    return <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-6 text-slate-900 dark:text-slate-100">Проверяем вход...</div>;
+  if (authLoading || userBootstrapLoading) {
+    return <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-6 text-slate-900 dark:text-slate-100">Проверяем доступ...</div>;
   }
 
   if (!authUser) {
@@ -2518,7 +2525,7 @@ const saveAllToDb = async () => {
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="%">%</SelectItem>
-                                <SelectItem value="Руб">Руб</SelectItem>
+                                <SelectItem value="₸">₸</SelectItem>
                                 <SelectItem value="шт">шт</SelectItem>
                                 <SelectItem value="часы">часы</SelectItem>
                               </SelectContent>
